@@ -2451,42 +2451,29 @@ int sdhci_suspend_host(struct sdhci_host *host)
 		host->flags &= ~SDHCI_NEEDS_RETUNING;
 	}
 
-	if (host->mmc->card) {
-		ret = mmc_suspend_host(host->mmc);
-		if (ret) {
-			if (has_tuning_timer) {
-				host->flags |= SDHCI_NEEDS_RETUNING;
-				mod_timer(&host->tuning_timer, jiffies +
-						host->tuning_count * HZ);
-			}
-
-			sdhci_enable_card_detection(host);
-
-			return ret;
+	ret = mmc_suspend_host(host->mmc);
+	if (ret) {
+		if (has_tuning_timer) {
+			host->flags |= SDHCI_NEEDS_RETUNING;
+			mod_timer(&host->tuning_timer, jiffies +
+					host->tuning_count * HZ);
 		}
+
+		sdhci_enable_card_detection(host);
+
+		return ret;
 	}
 
 	if (host->mmc->pm_flags & MMC_PM_KEEP_POWER)
 		host->card_int_set = sdhci_readl(host, SDHCI_INT_ENABLE) &
 			SDHCI_INT_CARD_INT;
 
-	sdhci_mask_irqs(host, SDHCI_INT_ALL_MASK);
+	free_irq(host->irq, host);
 
-	if (host->vmmc) {
-		ret = regulator_disable(host->vmmc);
-		if (ret)
-			pr_err("%s: failed to disable regulator\n", __func__);
-	}
+	if (host->ops->platform_suspend)
+		host->ops->platform_suspend(host);
 
-	if (host->irq)
-		disable_irq(host->irq);
-
-	if (!ret) {
-		if (host->ops->platform_suspend)
-			host->ops->platform_suspend(host);
-	}
-
-	return 0;
+	return ret;
 }
 
 EXPORT_SYMBOL_GPL(sdhci_suspend_host);
@@ -2494,41 +2481,36 @@ EXPORT_SYMBOL_GPL(sdhci_suspend_host);
 int sdhci_resume_host(struct sdhci_host *host)
 {
 	int ret = 0;
- 	if (host->ops->platform_resume)
-		host->ops->platform_resume(host);
  
- 	if (host->vmmc) {
-		ret = regulator_enable(host->vmmc);
-		if (ret)
-			return ret;
-	}
-
+	if (host->ops->platform_resume)
+		host->ops->platform_resume(host);
 
 	if (host->flags & (SDHCI_USE_SDMA | SDHCI_USE_ADMA)) {
 		if (host->ops->enable_dma)
 			host->ops->enable_dma(host);
 	}
 
-	if (host->irq)
-		enable_irq(host->irq);
+	ret = request_irq(host->irq, sdhci_irq, IRQF_SHARED,
+						mmc_hostname(host->mmc), host);
+
+	if (ret)
+    	return ret;
 
 	sdhci_init(host, (host->mmc->pm_flags & MMC_PM_KEEP_POWER));
 	mmiowb();
 
-	if (host->mmc->card) {
-		ret = mmc_resume_host(host->mmc);
-		/* Enable card interrupt as it is overwritten in sdhci_init */
-		if ((host->mmc->caps & MMC_CAP_SDIO_IRQ) &&
+	ret = mmc_resume_host(host->mmc);
+	/* Enable card interrupt as it is overwritten in sdhci_init */
+	if ((host->mmc->caps & MMC_CAP_SDIO_IRQ) &&
 			(host->mmc->pm_flags & MMC_PM_KEEP_POWER))
-				if (host->card_int_set)
-					host->mmc->ops->enable_sdio_irq(host->mmc, true);
-	}
+		if (host->card_int_set)
+			host->mmc->ops->enable_sdio_irq(host->mmc, true);
 
 	sdhci_enable_card_detection(host);
 
 	/* Set the re-tuning expiration flag */
 	if ((host->version >= SDHCI_SPEC_300) && host->tuning_count &&
-	    (host->tuning_mode == SDHCI_TUNING_MODE_1))
+			(host->tuning_mode == SDHCI_TUNING_MODE_1))
 		host->flags |= SDHCI_NEEDS_RETUNING;
 
 	return ret;

@@ -26,6 +26,7 @@
 #include <linux/mmc/sd.h>
 #include <linux/regulator/consumer.h>
 #include <linux/delay.h>
+#include <linux/pm_runtime.h>
 
 #include <mach/gpio.h>
 #include <mach/sdhci.h>
@@ -865,37 +866,6 @@ static void tegra_sdhci_suspend(struct sdhci_host *sdhci)
 		}
 	}
 
-	if (!strcmp(mmc_hostname(sdhci->mmc), "mmc0")) {
-                pr_debug("%s: pull up data pin \n", mmc_hostname(sdhci->mmc));
-
-                tegra_gpio_enable(TEGRA_GPIO_PAA0);
-                tegra_gpio_enable(TEGRA_GPIO_PAA1);
-                tegra_gpio_enable(TEGRA_GPIO_PAA2);
-                tegra_gpio_enable(TEGRA_GPIO_PAA3);
-                tegra_gpio_enable(TEGRA_GPIO_PAA4);
-                tegra_gpio_enable(TEGRA_GPIO_PAA5);
-                tegra_gpio_enable(TEGRA_GPIO_PAA6);
-                tegra_gpio_enable(TEGRA_GPIO_PAA7);
-
-                gpio_request(TEGRA_GPIO_PAA0, "PAA0");
-                gpio_request(TEGRA_GPIO_PAA1, "PAA1");
-                gpio_request(TEGRA_GPIO_PAA2, "PAA2");
-                gpio_request(TEGRA_GPIO_PAA3, "PAA3");
-                gpio_request(TEGRA_GPIO_PAA4, "PAA4");
-                gpio_request(TEGRA_GPIO_PAA5, "PAA5");
-                gpio_request(TEGRA_GPIO_PAA6, "PAA6");
-                gpio_request(TEGRA_GPIO_PAA7, "PAA7");
-
-                gpio_direction_output(TEGRA_GPIO_PAA0, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA1, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA2, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA3, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA4, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA5, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA6, 1);
-                gpio_direction_output(TEGRA_GPIO_PAA7, 1);
-        }
-
 	return;
 }
 
@@ -921,8 +891,7 @@ static void tegra_sdhci_resume(struct sdhci_host *sdhci)
 			if (tegra_host->vdd_slot_reg && tegra_host->vdd_slot_reg->rdev->use_count == 0)
 				ret = regulator_enable(tegra_host->vdd_slot_reg);
 		}
-	}
-	else {
+	} else {
 		if (tegra_host->card_present) {
 			if (!tegra_host->is_rail_enabled) {
 				if (tegra_host->vdd_slot_reg)
@@ -944,19 +913,6 @@ static void tegra_sdhci_resume(struct sdhci_host *sdhci)
 		sdhci_writeb(sdhci, SDHCI_POWER_ON, SDHCI_POWER_CONTROL);
 		sdhci->pwr = 0;
 	}
-
-	if (!strcmp(mmc_hostname(sdhci->mmc), "mmc0")) {
-		pr_debug("%s: disable data pin \n", mmc_hostname(sdhci->mmc));
-
-                tegra_gpio_disable(TEGRA_GPIO_PAA0);
-                tegra_gpio_disable(TEGRA_GPIO_PAA1);
-                tegra_gpio_disable(TEGRA_GPIO_PAA2);
-                tegra_gpio_disable(TEGRA_GPIO_PAA3);
-                tegra_gpio_disable(TEGRA_GPIO_PAA4);
-                tegra_gpio_disable(TEGRA_GPIO_PAA5);
-                tegra_gpio_disable(TEGRA_GPIO_PAA6);
-                tegra_gpio_disable(TEGRA_GPIO_PAA7);
-        }
 
 	return;
 }
@@ -1003,6 +959,7 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 	struct tegra_sdhci_host *tegra_host;
 	struct clk *clk;
 	int rc;
+	int ret = 0;
 
 	host = sdhci_pltfm_init(pdev, &sdhci_tegra_pdata);
 	if (IS_ERR(host))
@@ -1103,6 +1060,7 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 	if (!gpio_is_valid(plat->cd_gpio))
 		tegra_host->card_present = 1;
 
+	//vdds
 	if (!plat->mmc_data.built_in && !strcmp(mmc_hostname(host->mmc), "mmc2")) {
 		pr_debug("%s: non-built_in %d \n", mmc_hostname(host->mmc), plat->mmc_data.built_in);
 		if (plat->mmc_data.ocr_mask & SDHOST_1V8_OCR_MASK) {
@@ -1171,6 +1129,22 @@ static int __devinit sdhci_tegra_probe(struct platform_device *pdev)
 		}
 	}
 
+	//pm
+	ret = pm_runtime_set_active(&(pdev)->dev);
+	if (ret < 0)
+		pr_info("%s: %s: failed with error %d", mmc_hostname(host->mmc),
+				__func__, ret);
+	/*
+	 * There is no notion of suspend/resume for SD/MMC/SDIO
+	 * cards. So host can be suspended/resumed with out
+	 * worrying about its children.
+	 */
+	pm_suspend_ignore_children(&(pdev)->dev, true);
+	if (!strcmp(mmc_hostname(host->mmc), "mmc0")) {
+		pm_runtime_enable(&(pdev)->dev);
+	}
+
+	//clocks
 	clk = clk_get(mmc_dev(host->mmc), NULL);
 	if (IS_ERR(clk)) {
 		dev_err(mmc_dev(host->mmc), "clk err\n");
@@ -1242,6 +1216,8 @@ err_clk_get:
 		tegra_gpio_disable(plat->wp_gpio);
 		gpio_free(plat->wp_gpio);
 	}
+	pm_runtime_disable(&(pdev)->dev);
+	pm_runtime_set_suspended(&(pdev)->dev);
 err_wp_req:
 	if (gpio_is_valid(plat->cd_gpio))
 		free_irq(gpio_to_irq(plat->cd_gpio), host);
@@ -1270,6 +1246,9 @@ static int __devexit sdhci_tegra_remove(struct platform_device *pdev)
 	struct tegra_sdhci_host *tegra_host = pltfm_host->priv;
 	struct tegra_sdhci_platform_data *plat;
 	int dead = (readl(host->ioaddr + SDHCI_INT_STATUS) == 0xffffffff);
+
+	if (pm_runtime_suspended(&(pdev)->dev))
+		pm_runtime_resume(&(pdev)->dev);
 
 	sdhci_remove_host(host, dead);
 
@@ -1309,6 +1288,9 @@ static int __devexit sdhci_tegra_remove(struct platform_device *pdev)
 
 	sdhci_pltfm_free(pdev);
 	kfree(tegra_host);
+
+	pm_runtime_disable(&(pdev)->dev);
+	pm_runtime_set_suspended(&(pdev)->dev);
 
 	return 0;
 }
