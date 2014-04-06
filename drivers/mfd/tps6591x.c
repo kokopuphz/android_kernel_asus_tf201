@@ -385,17 +385,17 @@ static void tps6591x_power_off(void)
 	pr_err("%s(): Setting power off seq\n", __func__);
 	ret = tps6591x_set_bits(dev, TPS6591X_DEVCTRL, DEVCTRL_PWR_OFF_SEQ);
 	if (ret < 0)
-		return ret;
+		return;
 
 	pr_err("%s(): Clearing DEV_SLP\n", __func__);
 	ret = tps6591x_clr_bits(dev, TPS6591X_DEVCTRL, DEVCTRL_DEV_SLP);
 	if (ret < 0)
-		return ret;
+		return;
 
 	pr_err("%s(): Setting device off and clearing dev-on\n", __func__);
 	ret = tps6591x_update(dev, TPS6591X_DEVCTRL, DEVCTRL_DEV_OFF,
 					DEVCTRL_DEV_OFF | DEVCTRL_DEV_ON);
-	return ret;
+	return;
 }
 
 static int tps6591x_gpio_get(struct gpio_chip *gc, unsigned offset)
@@ -1112,7 +1112,7 @@ static int tps6591x_i2c_resume(struct i2c_client *client)
 }
 #endif
 
-static int tps6591x_i2c_shutdown(struct i2c_client *client)
+static void tps6591x_i2c_shutdown(struct i2c_client *client)
 {
 	int ret;
 
@@ -1122,7 +1122,7 @@ static int tps6591x_i2c_shutdown(struct i2c_client *client)
 	ret = tps6591x_set_bits(&client->dev, TPS6591X_INT_MSK, RTC_ALARM_IT_MSK);
 	if (ret < 0)
 		pr_err("%s(): Setting RTC_ALARM_IT_MSK fail.\n", __func__);
-	return ret;
+	return;
 }
 
 
