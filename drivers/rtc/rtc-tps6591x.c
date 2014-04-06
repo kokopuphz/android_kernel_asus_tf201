@@ -429,6 +429,37 @@ static irqreturn_t tps6591x_rtc_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+
+#ifdef CONFIG_PM
+static int tps6591x_rtc_resume(struct device *dev)
+{
+	struct tps6591x_rtc *rtc_dd = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(dev)) {
+		disable_irq_wake(rtc_dd->irq);
+	}
+
+	return 0;
+}
+
+static int tps6591x_rtc_suspend(struct device *dev)
+{
+	struct tps6591x_rtc *rtc_dd = dev_get_drvdata(dev);
+
+	if (device_may_wakeup(dev)) {
+		enable_irq_wake(rtc_dd->irq);
+	}
+
+	return 0;
+}
+
+static const struct dev_pm_ops tps6591x_rtc_pm_ops = {
+	.suspend = tps6591x_rtc_suspend,
+	.resume = tps6591x_rtc_resume,
+};
+#endif
+
+
 static int __devinit tps6591x_rtc_probe(struct platform_device *pdev)
 {
 	struct tps6591x_rtc_platform_data *pdata = pdev->dev.platform_data;
@@ -523,7 +554,7 @@ static int __devinit tps6591x_rtc_probe(struct platform_device *pdev)
 			rtc->irq = -1;
 		} else {
 			device_init_wakeup(&pdev->dev, 1);
-			enable_irq_wake(rtc->irq);
+			//enable_irq_wake(rtc->irq);
 		}
 	}
 	return 0;
@@ -564,6 +595,9 @@ static struct platform_driver tps6591x_rtc_driver = {
 	.driver	= {
 		.name	= "rtc_tps6591x",
 		.owner	= THIS_MODULE,
+#ifdef CONFIG_PM
+		.pm	= &tps6591x_rtc_pm_ops,
+#endif
 	},
 	.probe	= tps6591x_rtc_probe,
 	.remove	= __devexit_p(tps6591x_rtc_remove),
