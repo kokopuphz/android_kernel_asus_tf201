@@ -2063,9 +2063,12 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
 	struct mmc_card *card = md->queue.card;
 
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-	if (mmc_bus_needs_resume(card->host)) {
-		mmc_resume_bus(card->host);
-		//mmc_blk_set_blksize(md, card);
+	//mmc0 will not support deferred resume due to bkops
+	if (strcmp(mmc_hostname(card->host), "mmc0")) {
+		if (mmc_bus_needs_resume(card->host)) {
+			mmc_resume_bus(card->host);
+			//mmc_blk_set_blksize(md, card);
+		}
 	}
 #endif
 
@@ -2508,7 +2511,9 @@ static int mmc_blk_probe(struct mmc_card *card)
 	mmc_fixup_device(card, blk_fixups);
 
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-	mmc_set_bus_resume_policy(card->host, 1);
+	//mmc0 will not support deferred resume due to bkops
+	if (strcmp(mmc_hostname(card->host), "mmc0"))
+		mmc_set_bus_resume_policy(card->host, 1);
 #endif
 	if (mmc_add_disk(md))
 		goto out;
@@ -2536,7 +2541,9 @@ static void mmc_blk_remove(struct mmc_card *card)
 	mmc_blk_remove_req(md);
 	mmc_set_drvdata(card, NULL);
 #ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
-	mmc_set_bus_resume_policy(card->host, 0);
+	//mmc0 will not support deferred resume due to bkops
+	if (strcmp(mmc_hostname(card->host), "mmc0"))
+		mmc_set_bus_resume_policy(card->host, 0);
 #endif
 }
 
