@@ -10,7 +10,7 @@
  */
 #include <stdarg.h>
 
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
@@ -57,7 +57,7 @@ static const char *isa_modes[] = {
   "ARM" , "Thumb" , "Jazelle", "ThumbEE"
 };
 
-extern void setup_mm_for_reboot(char mode);
+extern void setup_mm_for_reboot(void);
 
 static volatile int hlt_counter;
 
@@ -104,6 +104,9 @@ static int __init hlt_setup(char *__unused)
 __setup("nohlt", nohlt_setup);
 __setup("hlt", hlt_setup);
 
+extern void call_with_stack(void (*fn)(void *), void *arg, void *sp);
+typedef void (*phys_reset_t)(unsigned long);
+
 #ifdef CONFIG_ARM_FLUSH_CONSOLE_ON_RESTART
 void arm_machine_flush_console(void)
 {
@@ -129,14 +132,21 @@ void arm_machine_flush_console(void)
 }
 #endif
 
-void arm_machine_restart(char mode, const char *cmd)
+/*
+ * A temporary stack to use for CPU reset. This is static so that we
+ * don't clobber it with the identity mapping. When running with this
+ * stack, any references to the current task *will not work* so you
+ * should really do as little as possible before jumping to your reset
+ * code.
+ */
+static u64 soft_restart_stack[16];
+
+static void __soft_restart(void *addr)
 {
-	/*
-	 * Tell the mm system that we are going to reboot -
-	 * we may need it to insert some 1:1 mappings so that
-	 * soft boot works.
-	 */
-	setup_mm_for_reboot(mode);
+	phys_reset_t phys_reset;
+
+	/* Take out a flat memory mapping. */
+	setup_mm_for_reboot();
 
 	/* Clean and invalidate caches */
 	flush_cache_all();
@@ -147,18 +157,38 @@ void arm_machine_restart(char mode, const char *cmd)
 	/* Push out any further dirty data, and ensure cache is empty */
 	flush_cache_all();
 
-	/*
-	 * Now call the architecture specific reboot code.
-	 */
-	arch_reset(mode, cmd);
+	/* Push out the dirty data from external caches */
+	outer_disable();
 
-	/*
-	 * Whoops - the architecture was unable to reboot.
-	 * Tell the user!
-	 */
-	mdelay(1000);
-	printk("Reboot failed -- System halted\n");
-	while (1);
+	/* Switch to the identity mapping. */
+	phys_reset = (phys_reset_t)(unsigned long)virt_to_phys(cpu_reset);
+	phys_reset((unsigned long)addr);
+
+	/* Should never get here. */
+	BUG();
+}
+
+void soft_restart(unsigned long addr)
+{
+	u64 *stack = soft_restart_stack + ARRAY_SIZE(soft_restart_stack);
+
+	/* Disable interrupts first */
+	local_irq_disable();
+	local_fiq_disable();
+
+	/* Disable the L2 if we're the last man standing. */
+	if (num_online_cpus() == 1)
+		outer_disable();
+
+	/* Change to the new stack and continue with the reset. */
+	call_with_stack(__soft_restart, (void *)addr, (void *)stack);
+
+	/* Should never get here. */
+	BUG();
+}
+
+static void null_restart(char mode, const char *cmd)
+{
 }
 
 /*
@@ -167,7 +197,7 @@ void arm_machine_restart(char mode, const char *cmd)
 void (*pm_power_off)(void);
 EXPORT_SYMBOL(pm_power_off);
 
-void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
+void (*arm_pm_restart)(char str, const char *cmd) = null_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
 static void do_nothing(void *unused)
@@ -191,13 +221,18 @@ void cpu_idle_wait(void)
 EXPORT_SYMBOL_GPL(cpu_idle_wait);
 
 /*
- * This is our default idle handler.  We need to disable
- * interrupts here to ensure we don't miss a wakeup call.
+ * This is our default idle handler.
  */
+
+extern void arch_idle(void);
+void (*arm_pm_idle)(void) = arch_idle;
+
 static void default_idle(void)
 {
-	if (!need_resched())
-		arch_idle();
+	if (arm_pm_idle)
+		arm_pm_idle();
+	else
+		cpu_do_idle();
 	local_irq_enable();
 }
 
@@ -390,6 +425,12 @@ void __show_regs(struct pt_regs *regs)
 	unsigned long flags;
 	char buf[64];
 
+#ifdef CONFIG_LGE_CRASH_HANDLER
+#ifdef CONFIG_CPU_CP15_MMU
+	unsigned int c1, c2;
+#endif
+	set_crash_store_enable();
+#endif
 	printk("CPU: %d    %s  (%s %.*s)\n",
 		raw_smp_processor_id(), print_tainted(),
 		init_utsname()->release,
@@ -397,7 +438,11 @@ void __show_regs(struct pt_regs *regs)
 		init_utsname()->version);
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
 	print_symbol("LR is at %s\n", regs->ARM_lr);
+#ifdef CONFIG_LGE_CRASH_HANDLER
+	printk("pc : <%08lx>    lr : <%08lx>    psr: %08lx\n"
+#else
 	printk("pc : [<%08lx>]    lr : [<%08lx>]    psr: %08lx\n"
+#endif
 	       "sp : %08lx  ip : %08lx  fp : %08lx\n",
 		regs->ARM_pc, regs->ARM_lr, regs->ARM_cpsr,
 		regs->ARM_sp, regs->ARM_ip, regs->ARM_fp);
@@ -410,6 +455,9 @@ void __show_regs(struct pt_regs *regs)
 	printk("r3 : %08lx  r2 : %08lx  r1 : %08lx  r0 : %08lx\n",
 		regs->ARM_r3, regs->ARM_r2,
 		regs->ARM_r1, regs->ARM_r0);
+#ifdef CONFIG_LGE_CRASH_HANDLER
+	set_crash_store_disable();
+#endif
 
 	flags = regs->ARM_cpsr;
 	buf[0] = flags & PSR_N_BIT ? 'N' : 'n';
@@ -437,11 +485,18 @@ void __show_regs(struct pt_regs *regs)
 			    : "=r" (transbase), "=r" (dac));
 			snprintf(buf, sizeof(buf), "  Table: %08x  DAC: %08x",
 			  	transbase, dac);
+#if defined(CONFIG_CPU_CP15_MMU) && defined(CONFIG_LGE_CRASH_HANDLER)
+			c1 = transbase;
+			c2 = dac;
+#endif
 		}
 #endif
 		asm("mrc p15, 0, %0, c1, c0\n" : "=r" (ctrl));
 
 		printk("Control: %08x%s\n", ctrl, buf);
+#if defined(CONFIG_CPU_CP15_MMU) && defined(CONFIG_LGE_CRASH_HANDLER)
+		lge_save_ctx(regs, ctrl, c1, c2);
+#endif
 	}
 #endif
 
@@ -453,7 +508,7 @@ void show_regs(struct pt_regs * regs)
 	printk("\n");
 	printk("Pid: %d, comm: %20s\n", task_pid_nr(current), current->comm);
 	__show_regs(regs);
-	__backtrace();
+	dump_stack();
 }
 
 ATOMIC_NOTIFIER_HEAD(thread_notify_head);

@@ -43,6 +43,7 @@
 #include <asm/cpu_pm.h>
 #include <asm/hardware/gic.h>
 #include <asm/localtimer.h>
+#include <asm/smp_twd.h>
 
 #include <mach/iomap.h>
 #include <mach/irqs.h>

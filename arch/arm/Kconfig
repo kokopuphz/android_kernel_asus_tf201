@@ -610,6 +610,7 @@ config ARCH_TEGRA
 	select ARCH_PROVIDES_UDELAY
 	select FIQ
 	select PCI
+	select ARM_CPU_SUSPEND if PM
 	help
 	  This enables support for NVIDIA Tegra based systems (Tegra APX,
 	  Tegra 6xx and Tegra 2 series).
@@ -1454,6 +1455,31 @@ config SMP_ON_UP
 
 	  If you don't know what to do here, say Y.
 
+config ARM_CPU_TOPOLOGY
+	bool "Support cpu topology definition"
+	depends on SMP && CPU_V7
+	default y
+	help
+	  Support ARM cpu topology definition. The MPIDR register defines
+	  affinity between processors which is then used to describe the cpu
+	  topology of an ARM System.
+
+config SCHED_MC
+	bool "Multi-core scheduler support"
+	depends on ARM_CPU_TOPOLOGY
+	help
+	  Multi-core scheduler support improves the CPU scheduler's decision
+	  making when dealing with multi-core CPU chips at a cost of slightly
+	  increased overhead in some places. If unsure say N here.
+
+config SCHED_SMT
+	bool "SMT scheduler support"
+	depends on ARM_CPU_TOPOLOGY
+	help
+	  Improves the CPU scheduler's decision making when dealing with
+	  MultiThreading at a cost of slightly increased overhead in some
+	  places. If unsure say N here.
+
 config HAVE_ARM_SCU
 	bool
 	help
@@ -2218,6 +2244,9 @@ config ARCH_SUSPEND_POSSIBLE
 	depends on CPU_ARM920T || CPU_ARM926T || CPU_SA1100 || \
 		CPU_V6 || CPU_V6K || CPU_V7 || CPU_XSC3 || CPU_XSCALE
 	def_bool y
+
+config ARM_CPU_SUSPEND
+	def_bool PM_SLEEP
 
 endmenu
 
