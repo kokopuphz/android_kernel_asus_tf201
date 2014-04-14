@@ -57,7 +57,7 @@ static const char *isa_modes[] = {
   "ARM" , "Thumb" , "Jazelle", "ThumbEE"
 };
 
-extern void setup_mm_for_reboot(void);
+extern void setup_mm_for_reboot(char mode);
 
 static volatile int hlt_counter;
 
@@ -132,21 +132,14 @@ void arm_machine_flush_console(void)
 }
 #endif
 
-/*
- * A temporary stack to use for CPU reset. This is static so that we
- * don't clobber it with the identity mapping. When running with this
- * stack, any references to the current task *will not work* so you
- * should really do as little as possible before jumping to your reset
- * code.
- */
-static u64 soft_restart_stack[16];
-
-static void __soft_restart(void *addr)
+void arm_machine_restart(char mode, const char *cmd)
 {
-	phys_reset_t phys_reset;
-
-	/* Take out a flat memory mapping. */
-	setup_mm_for_reboot();
+	/*
+	 * Tell the mm system that we are going to reboot -
+	 * we may need it to insert some 1:1 mappings so that
+	 * soft boot works.
+	 */
+	setup_mm_for_reboot(mode);
 
 	/* Clean and invalidate caches */
 	flush_cache_all();
@@ -157,38 +150,18 @@ static void __soft_restart(void *addr)
 	/* Push out any further dirty data, and ensure cache is empty */
 	flush_cache_all();
 
-	/* Push out the dirty data from external caches */
-	outer_disable();
+	/*
+	 * Now call the architecture specific reboot code.
+	 */
+	arch_reset(mode, cmd);
 
-	/* Switch to the identity mapping. */
-	phys_reset = (phys_reset_t)(unsigned long)virt_to_phys(cpu_reset);
-	phys_reset((unsigned long)addr);
-
-	/* Should never get here. */
-	BUG();
-}
-
-void soft_restart(unsigned long addr)
-{
-	u64 *stack = soft_restart_stack + ARRAY_SIZE(soft_restart_stack);
-
-	/* Disable interrupts first */
-	local_irq_disable();
-	local_fiq_disable();
-
-	/* Disable the L2 if we're the last man standing. */
-	if (num_online_cpus() == 1)
-		outer_disable();
-
-	/* Change to the new stack and continue with the reset. */
-	call_with_stack(__soft_restart, (void *)addr, (void *)stack);
-
-	/* Should never get here. */
-	BUG();
-}
-
-static void null_restart(char mode, const char *cmd)
-{
+	/*
+	 * Whoops - the architecture was unable to reboot.
+	 * Tell the user!
+	 */
+	mdelay(1000);
+	printk("Reboot failed -- System halted\n");
+	while (1);
 }
 
 /*
@@ -197,7 +170,7 @@ static void null_restart(char mode, const char *cmd)
 void (*pm_power_off)(void);
 EXPORT_SYMBOL(pm_power_off);
 
-void (*arm_pm_restart)(char str, const char *cmd) = null_restart;
+void (*arm_pm_restart)(char str, const char *cmd) = arm_machine_restart;
 EXPORT_SYMBOL_GPL(arm_pm_restart);
 
 static void do_nothing(void *unused)
@@ -305,15 +278,6 @@ void machine_shutdown(void)
 {
 	preempt_disable();
 #ifdef CONFIG_SMP
-	/*
-	 * Disable preemption so we're guaranteed to
-	 * run to power off or reboot and prevent
-	 * the possibility of switching to another
-	 * thread that might wind up blocking on
-	 * one of the stopped CPUs.
-	 */
-	preempt_disable();
-
 	smp_send_stop();
 #endif
 }
@@ -333,20 +297,16 @@ void machine_power_off(void)
 
 void machine_restart(char *cmd)
 {
-	machine_shutdown();
-
 	/* Flush the console to make sure all the relevant messages make it
 	 * out to the console drivers */
 	arm_machine_flush_console();
 
+	/* Disable interrupts first */
+	local_irq_disable();
+	local_fiq_disable();
+
+	machine_shutdown();
 	arm_pm_restart(reboot_mode, cmd);
-
-	/* Give a grace period for failure to restart of 1s */
-	mdelay(1000);
-
-	/* Whoops - the platform was unable to reboot. Tell the user! */
-	printk("Reboot failed -- System halted\n");
-	while (1);
 }
 
 /*
