@@ -108,6 +108,8 @@ xfs_da_node_create(xfs_da_args_t *args, xfs_dablk_t blkno, int level,
 	int error;
 	xfs_trans_t *tp;
 
+	trace_xfs_da_node_create(args);
+
 	tp = args->trans;
 	error = xfs_da_get_buf(tp, args->dp, blkno, -1, &bp, whichfork);
 	if (error)
@@ -139,6 +141,8 @@ xfs_da_split(xfs_da_state_t *state)
 	xfs_da_intnode_t *node;
 	xfs_dabuf_t *bp;
 	int max, action, error, i;
+
+	trace_xfs_da_split(state->args);
 
 	/*
 	 * Walk back up the tree splitting/inserting/adjusting as necessary.
@@ -178,10 +182,12 @@ xfs_da_split(xfs_da_state_t *state)
 			state->extravalid = 1;
 			if (state->inleaf) {
 				state->extraafter = 0;	/* before newblk */
+				trace_xfs_attr_leaf_split_before(state->args);
 				error = xfs_attr_leaf_split(state, oldblk,
 							    &state->extrablk);
 			} else {
 				state->extraafter = 1;	/* after newblk */
+				trace_xfs_attr_leaf_split_after(state->args);
 				error = xfs_attr_leaf_split(state, newblk,
 							    &state->extrablk);
 			}
@@ -300,6 +306,8 @@ xfs_da_root_split(xfs_da_state_t *state, xfs_da_state_blk_t *blk1,
 	xfs_mount_t *mp;
 	xfs_dir2_leaf_t *leaf;
 
+	trace_xfs_da_root_split(state->args);
+
 	/*
 	 * Copy the existing (incorrect) block from the root node position
 	 * to a free space somewhere.
@@ -379,6 +387,8 @@ xfs_da_node_split(xfs_da_state_t *state, xfs_da_state_blk_t *oldblk,
 	xfs_dablk_t blkno;
 	int newcount, error;
 	int useextra;
+
+	trace_xfs_da_node_split(state->args);
 
 	node = oldblk->bp->data;
 	ASSERT(node->hdr.info.magic == cpu_to_be16(XFS_DA_NODE_MAGIC));
@@ -465,6 +475,8 @@ xfs_da_node_rebalance(xfs_da_state_t *state, xfs_da_state_blk_t *blk1,
 	xfs_da_node_entry_t *btree_s, *btree_d;
 	int count, tmp;
 	xfs_trans_t *tp;
+
+	trace_xfs_da_node_rebalance(state->args);
 
 	node1 = blk1->bp->data;
 	node2 = blk2->bp->data;
@@ -574,6 +586,8 @@ xfs_da_node_add(xfs_da_state_t *state, xfs_da_state_blk_t *oldblk,
 	xfs_da_node_entry_t *btree;
 	int tmp;
 
+	trace_xfs_da_node_add(state->args);
+
 	node = oldblk->bp->data;
 	ASSERT(node->hdr.info.magic == cpu_to_be16(XFS_DA_NODE_MAGIC));
 	ASSERT((oldblk->index >= 0) && (oldblk->index <= be16_to_cpu(node->hdr.count)));
@@ -618,6 +632,8 @@ xfs_da_join(xfs_da_state_t *state)
 {
 	xfs_da_state_blk_t *drop_blk, *save_blk;
 	int action, error;
+
+	trace_xfs_da_join(state->args);
 
 	action = 0;
 	drop_blk = &state->path.blk[ state->path.active-1 ];
@@ -722,6 +738,8 @@ xfs_da_root_join(xfs_da_state_t *state, xfs_da_state_blk_t *root_blk)
 	xfs_dablk_t child;
 	xfs_dabuf_t *bp;
 	int error;
+
+	trace_xfs_da_root_join(state->args);
 
 	args = state->args;
 	ASSERT(args != NULL);
@@ -941,6 +959,8 @@ xfs_da_node_remove(xfs_da_state_t *state, xfs_da_state_blk_t *drop_blk)
 	xfs_da_node_entry_t *btree;
 	int tmp;
 
+	trace_xfs_da_node_remove(state->args);
+
 	node = drop_blk->bp->data;
 	ASSERT(drop_blk->index < be16_to_cpu(node->hdr.count));
 	ASSERT(drop_blk->index >= 0);
@@ -983,6 +1003,8 @@ xfs_da_node_unbalance(xfs_da_state_t *state, xfs_da_state_blk_t *drop_blk,
 	xfs_da_node_entry_t *btree;
 	int tmp;
 	xfs_trans_t *tp;
+
+	trace_xfs_da_node_unbalance(state->args);
 
 	drop_node = drop_blk->bp->data;
 	save_node = save_blk->bp->data;
@@ -1230,6 +1252,7 @@ xfs_da_blk_link(xfs_da_state_t *state, xfs_da_state_blk_t *old_blk,
 		/*
 		 * Link new block in before existing block.
 		 */
+		trace_xfs_da_link_before(args);
 		new_info->forw = cpu_to_be32(old_blk->blkno);
 		new_info->back = old_info->back;
 		if (old_info->back) {
@@ -1251,6 +1274,7 @@ xfs_da_blk_link(xfs_da_state_t *state, xfs_da_state_blk_t *old_blk,
 		/*
 		 * Link new block in after existing block.
 		 */
+		trace_xfs_da_link_after(args);
 		new_info->forw = old_info->forw;
 		new_info->back = cpu_to_be32(old_blk->blkno);
 		if (old_info->forw) {
@@ -1348,6 +1372,7 @@ xfs_da_blk_unlink(xfs_da_state_t *state, xfs_da_state_blk_t *drop_blk,
 	 * Unlink the leaf block from the doubly linked chain of leaves.
 	 */
 	if (be32_to_cpu(save_info->back) == drop_blk->blkno) {
+		trace_xfs_da_unlink_back(args);
 		save_info->back = drop_info->back;
 		if (drop_info->back) {
 			error = xfs_da_read_buf(args->trans, args->dp,
@@ -1365,6 +1390,7 @@ xfs_da_blk_unlink(xfs_da_state_t *state, xfs_da_state_blk_t *drop_blk,
 			xfs_da_buf_done(bp);
 		}
 	} else {
+		trace_xfs_da_unlink_forward(args);
 		save_info->forw = drop_info->forw;
 		if (drop_info->forw) {
 			error = xfs_da_read_buf(args->trans, args->dp,
@@ -1578,9 +1604,8 @@ xfs_da_grow_inode_int(
 	 */
 	nmap = 1;
 	ASSERT(args->firstblock != NULL);
-	error = xfs_bmapi(tp, dp, *bno, count,
-			xfs_bmapi_aflag(w)|XFS_BMAPI_WRITE|XFS_BMAPI_METADATA|
-			XFS_BMAPI_CONTIG,
+	error = xfs_bmapi_write(tp, dp, *bno, count,
+			xfs_bmapi_aflag(w)|XFS_BMAPI_METADATA|XFS_BMAPI_CONTIG,
 			args->firstblock, args->total, &map, &nmap,
 			args->flist);
 	if (error)
@@ -1602,9 +1627,8 @@ xfs_da_grow_inode_int(
 		for (b = *bno, mapi = 0; b < *bno + count; ) {
 			nmap = MIN(XFS_BMAP_MAX_NMAP, count);
 			c = (int)(*bno + count - b);
-			error = xfs_bmapi(tp, dp, b, c,
-					xfs_bmapi_aflag(w)|XFS_BMAPI_WRITE|
-					XFS_BMAPI_METADATA,
+			error = xfs_bmapi_write(tp, dp, b, c,
+					xfs_bmapi_aflag(w)|XFS_BMAPI_METADATA,
 					args->firstblock, args->total,
 					&mapp[mapi], &nmap, args->flist);
 			if (error)
@@ -1654,6 +1678,8 @@ xfs_da_grow_inode(
 	int			count;
 	int			error;
 
+	trace_xfs_da_grow_inode(args);
+
 	if (args->whichfork == XFS_DATA_FORK) {
 		bno = args->dp->i_mount->m_dirleafblk;
 		count = args->dp->i_mount->m_dirblkfsbs;
@@ -1691,6 +1717,8 @@ xfs_da_swap_lastblock(xfs_da_args_t *args, xfs_dablk_t *dead_blknop,
 	xfs_da_intnode_t *par_node, *dead_node;
 	xfs_dir2_leaf_t *dead_leaf2;
 	xfs_dahash_t dead_hash;
+
+	trace_xfs_da_swap_lastblock(args);
 
 	dead_buf = *dead_bufp;
 	dead_blkno = *dead_blknop;
@@ -1880,6 +1908,8 @@ xfs_da_shrink_inode(xfs_da_args_t *args, xfs_dablk_t dead_blkno,
 	xfs_trans_t *tp;
 	xfs_mount_t *mp;
 
+	trace_xfs_da_shrink_inode(args);
+
 	dp = args->dp;
 	w = args->whichfork;
 	tp = args->trans;
@@ -1975,33 +2005,16 @@ xfs_da_do_buf(
 		/*
 		 * Optimize the one-block case.
 		 */
-		if (nfsb == 1) {
-			xfs_fsblock_t	fsb;
-
-			if ((error =
-			    xfs_bmapi_single(trans, dp, whichfork, &fsb,
-				    (xfs_fileoff_t)bno))) {
-				return error;
-			}
+		if (nfsb == 1)
 			mapp = &map;
-			if (fsb == NULLFSBLOCK) {
-				nmap = 0;
-			} else {
-				map.br_startblock = fsb;
-				map.br_startoff = (xfs_fileoff_t)bno;
-				map.br_blockcount = 1;
-				nmap = 1;
-			}
-		} else {
+		else
 			mapp = kmem_alloc(sizeof(*mapp) * nfsb, KM_SLEEP);
-			nmap = nfsb;
-			if ((error = xfs_bmapi(trans, dp, (xfs_fileoff_t)bno,
-					nfsb,
-					XFS_BMAPI_METADATA |
-						xfs_bmapi_aflag(whichfork),
-					NULL, 0, mapp, &nmap, NULL)))
-				goto exit0;
-		}
+
+		nmap = nfsb;
+		error = xfs_bmapi_read(dp, (xfs_fileoff_t)bno, nfsb, mapp,
+				       &nmap, xfs_bmapi_aflag(whichfork));
+		if (error)
+			goto exit0;
 	} else {
 		map.br_startblock = XFS_DADDR_TO_FSB(mp, mappedbno);
 		map.br_startoff = (xfs_fileoff_t)bno;
@@ -2072,13 +2085,10 @@ xfs_da_do_buf(
 		if (!bp)
 			continue;
 		if (caller == 1) {
-			if (whichfork == XFS_ATTR_FORK) {
-				XFS_BUF_SET_VTYPE_REF(bp, B_FS_ATTR_BTREE,
-						XFS_ATTR_BTREE_REF);
-			} else {
-				XFS_BUF_SET_VTYPE_REF(bp, B_FS_DIR_BTREE,
-						XFS_DIR_BTREE_REF);
-			}
+			if (whichfork == XFS_ATTR_FORK)
+				xfs_buf_set_ref(bp, XFS_ATTR_BTREE_REF);
+			else
+				xfs_buf_set_ref(bp, XFS_DIR_BTREE_REF);
 		}
 		if (bplist) {
 			bplist[nbplist++] = bp;

@@ -118,17 +118,6 @@ xfs_rename(
 	new_parent = (src_dp != target_dp);
 	src_is_directory = S_ISDIR(src_ip->i_d.di_mode);
 
-	if (src_is_directory) {
-		/*
-		 * Check for link count overflow on target_dp
-		 */
-		if (target_ip == NULL && new_parent &&
-		    target_dp->i_d.di_nlink >= XFS_MAXLINK) {
-			error = XFS_ERROR(EMLINK);
-			goto std_return;
-		}
-	}
-
 	xfs_sort_for_rename(src_dp, target_dp, src_ip, target_ip,
 				inodes, &num_inodes);
 
@@ -170,12 +159,12 @@ xfs_rename(
 	 * we can rely on either trans_commit or trans_cancel to unlock
 	 * them.
 	 */
-	xfs_trans_ijoin_ref(tp, src_dp, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, src_dp, XFS_ILOCK_EXCL);
 	if (new_parent)
-		xfs_trans_ijoin_ref(tp, target_dp, XFS_ILOCK_EXCL);
-	xfs_trans_ijoin_ref(tp, src_ip, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, target_dp, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, src_ip, XFS_ILOCK_EXCL);
 	if (target_ip)
-		xfs_trans_ijoin_ref(tp, target_ip, XFS_ILOCK_EXCL);
+		xfs_trans_ijoin(tp, target_ip, XFS_ILOCK_EXCL);
 
 	/*
 	 * If we are using project inheritance, we only allow renames
