@@ -955,7 +955,6 @@ static struct nfs_parsed_mount_data *nfs_alloc_parsed_mount_data(unsigned int ve
 		data->auth_flavor_len	= 1;
 		data->version		= version;
 		data->minorversion	= 0;
-		data->net		= current->nsproxy->net_ns;
 		security_init_mnt_opts(&data->lsm_opts);
 	}
 	return data;
@@ -1464,7 +1463,7 @@ static int nfs_parse_mount_options(char *raw,
 			if (string == NULL)
 				goto out_nomem;
 			mnt->nfs_server.addrlen =
-				rpc_pton(mnt->net, string, strlen(string),
+				rpc_pton(string, strlen(string),
 					(struct sockaddr *)
 					&mnt->nfs_server.address,
 					sizeof(mnt->nfs_server.address));
@@ -1486,7 +1485,7 @@ static int nfs_parse_mount_options(char *raw,
 			if (string == NULL)
 				goto out_nomem;
 			mnt->mount_server.addrlen =
-				rpc_pton(mnt->net, string, strlen(string),
+				rpc_pton(string, strlen(string),
 					(struct sockaddr *)
 					&mnt->mount_server.address,
 					sizeof(mnt->mount_server.address));
@@ -1688,7 +1687,6 @@ static int nfs_try_mount(struct nfs_parsed_mount_data *args,
 		.noresvport	= args->flags & NFS_MOUNT_NORESVPORT,
 		.auth_flav_len	= &server_authlist_len,
 		.auth_flavs	= server_authlist,
-		.net		= args->net,
 	};
 	int status;
 
@@ -2428,7 +2426,7 @@ nfs_xdev_mount(struct file_system_type *fs_type, int flags,
 	dprintk("--> nfs_xdev_mount()\n");
 
 	/* create a new volume representation */
-	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr, data->authflavor);
+	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr);
 	if (IS_ERR(server)) {
 		error = PTR_ERR(server);
 		goto out_err_noserver;
@@ -2955,7 +2953,7 @@ nfs4_xdev_mount(struct file_system_type *fs_type, int flags,
 	dprintk("--> nfs4_xdev_mount()\n");
 
 	/* create a new volume representation */
-	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr, data->authflavor);
+	server = nfs_clone_server(NFS_SB(data->sb), data->fh, data->fattr);
 	if (IS_ERR(server)) {
 		error = PTR_ERR(server);
 		goto out_err_noserver;

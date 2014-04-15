@@ -53,6 +53,7 @@ static struct vfsmount *shm_mnt;
 #include <linux/blkdev.h>
 #include <linux/pagevec.h>
 #include <linux/percpu_counter.h>
+#include <linux/falloc.h>
 #include <linux/splice.h>
 #include <linux/security.h>
 #include <linux/swapops.h>
@@ -127,7 +128,7 @@ static inline struct shmem_sb_info *SHMEM_SB(struct super_block *sb)
 static inline int shmem_acct_size(unsigned long flags, loff_t size)
 {
 	return (flags & VM_NORESERVE) ?
-		0 : security_vm_enough_memory_kern(VM_ACCT(size));
+		0 : security_vm_enough_memory_mm(current->mm, VM_ACCT(size));
 }
 
 static inline void shmem_unacct_size(unsigned long flags, loff_t size)
@@ -145,7 +146,7 @@ static inline void shmem_unacct_size(unsigned long flags, loff_t size)
 static inline int shmem_acct_block(unsigned long flags)
 {
 	return (flags & VM_NORESERVE) ?
-		security_vm_enough_memory_kern(VM_ACCT(PAGE_CACHE_SIZE)) : 0;
+		security_vm_enough_memory_mm(current->mm, VM_ACCT(PAGE_CACHE_SIZE)) : 0;
 }
 
 static inline void shmem_unacct_blocks(unsigned long flags, long pages)
@@ -1086,7 +1087,7 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 }
 
 static struct inode *shmem_get_inode(struct super_block *sb, const struct inode *dir,
-				     int mode, dev_t dev, unsigned long flags)
+				     umode_t mode, dev_t dev, unsigned long flags)
 {
 	struct inode *inode;
 	struct shmem_inode_info *info;
@@ -1146,6 +1147,12 @@ static struct inode *shmem_get_inode(struct super_block *sb, const struct inode 
 #ifdef CONFIG_TMPFS
 static const struct inode_operations shmem_symlink_inode_operations;
 static const struct inode_operations shmem_short_symlink_operations;
+
+#ifdef CONFIG_TMPFS_XATTR
+static int shmem_initxattrs(struct inode *, const struct xattr *, void *);
+#else
+#define shmem_initxattrs NULL
+#endif
 
 static int
 shmem_write_begin(struct file *file, struct address_space *mapping,
@@ -1425,6 +1432,31 @@ static ssize_t shmem_file_splice_read(struct file *in, loff_t *ppos,
 	return error;
 }
 
+static long shmem_fallocate(struct file *file, int mode, loff_t offset,
+							 loff_t len)
+{
+	struct inode *inode = file->f_path.dentry->d_inode;
+	int error = -EOPNOTSUPP;
+
+	mutex_lock(&inode->i_mutex);
+
+	if (mode & FALLOC_FL_PUNCH_HOLE) {
+		struct address_space *mapping = file->f_mapping;
+		loff_t unmap_start = round_up(offset, PAGE_SIZE);
+		loff_t unmap_end = round_down(offset + len, PAGE_SIZE) - 1;
+
+		if ((u64)unmap_end > (u64)unmap_start)
+			unmap_mapping_range(mapping, unmap_start,
+					    1 + unmap_end - unmap_start, 0);
+		shmem_truncate_range(inode, offset, offset + len - 1);
+		/* No need to unmap again: hole-punching leaves COWed pages */
+		error = 0;
+	}
+
+	mutex_unlock(&inode->i_mutex);
+	return error;
+}
+
 static int shmem_statfs(struct dentry *dentry, struct kstatfs *buf)
 {
 	struct shmem_sb_info *sbinfo = SHMEM_SB(dentry->d_sb);
@@ -1450,7 +1482,7 @@ static int shmem_statfs(struct dentry *dentry, struct kstatfs *buf)
  * File creation. Allocate an inode, and we're done..
  */
 static int
-shmem_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
+shmem_mknod(struct inode *dir, struct dentry *dentry, umode_t mode, dev_t dev)
 {
 	struct inode *inode;
 	int error = -ENOSPC;
@@ -1458,8 +1490,8 @@ shmem_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 	inode = shmem_get_inode(dir->i_sb, dir, mode, dev, VM_NORESERVE);
 	if (inode) {
 		error = security_inode_init_security(inode, dir,
-						     &dentry->d_name, NULL,
-						     NULL, NULL);
+						     &dentry->d_name,
+						     shmem_initxattrs, NULL);
 		if (error) {
 			if (error != -EOPNOTSUPP) {
 				iput(inode);
@@ -1483,7 +1515,7 @@ shmem_mknod(struct inode *dir, struct dentry *dentry, int mode, dev_t dev)
 	return error;
 }
 
-static int shmem_mkdir(struct inode *dir, struct dentry *dentry, int mode)
+static int shmem_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int error;
 
@@ -1493,7 +1525,7 @@ static int shmem_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 	return 0;
 }
 
-static int shmem_create(struct inode *dir, struct dentry *dentry, int mode,
+static int shmem_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		struct nameidata *nd)
 {
 	return shmem_mknod(dir, dentry, mode | S_IFREG, 0);
@@ -1598,8 +1630,8 @@ static int shmem_symlink(struct inode *dir, struct dentry *dentry, const char *s
 	if (!inode)
 		return -ENOSPC;
 
-	error = security_inode_init_security(inode, dir, &dentry->d_name, NULL,
-					     NULL, NULL);
+	error = security_inode_init_security(inode, dir, &dentry->d_name,
+					     shmem_initxattrs, NULL);
 	if (error) {
 		if (error != -EOPNOTSUPP) {
 			iput(inode);
@@ -1672,6 +1704,66 @@ static void shmem_put_link(struct dentry *dentry, struct nameidata *nd, void *co
  * like ACLs, we also need to implement the security.* handlers at
  * filesystem level, though.
  */
+
+/*
+ * Allocate new xattr and copy in the value; but leave the name to callers.
+ */
+static struct shmem_xattr *shmem_xattr_alloc(const void *value, size_t size)
+{
+	struct shmem_xattr *new_xattr;
+	size_t len;
+
+	/* wrap around? */
+	len = sizeof(*new_xattr) + size;
+	if (len <= sizeof(*new_xattr))
+		return NULL;
+
+	new_xattr = kmalloc(len, GFP_KERNEL);
+	if (!new_xattr)
+		return NULL;
+
+	new_xattr->size = size;
+	memcpy(new_xattr->value, value, size);
+	return new_xattr;
+}
+
+/*
+ * Callback for security_inode_init_security() for acquiring xattrs.
+ */
+static int shmem_initxattrs(struct inode *inode,
+			    const struct xattr *xattr_array,
+			    void *fs_info)
+{
+	struct shmem_inode_info *info = SHMEM_I(inode);
+	const struct xattr *xattr;
+	struct shmem_xattr *new_xattr;
+	size_t len;
+
+	for (xattr = xattr_array; xattr->name != NULL; xattr++) {
+		new_xattr = shmem_xattr_alloc(xattr->value, xattr->value_len);
+		if (!new_xattr)
+			return -ENOMEM;
+
+		len = strlen(xattr->name) + 1;
+		new_xattr->name = kmalloc(XATTR_SECURITY_PREFIX_LEN + len,
+					  GFP_KERNEL);
+		if (!new_xattr->name) {
+			kfree(new_xattr);
+			return -ENOMEM;
+		}
+
+		memcpy(new_xattr->name, XATTR_SECURITY_PREFIX,
+		       XATTR_SECURITY_PREFIX_LEN);
+		memcpy(new_xattr->name + XATTR_SECURITY_PREFIX_LEN,
+		       xattr->name, len);
+
+		spin_lock(&info->lock);
+		list_add(&new_xattr->list, &info->xattr_list);
+		spin_unlock(&info->lock);
+	}
+
+	return 0;
+}
 
 static int shmem_xattr_get(struct dentry *dentry, const char *name,
 			   void *buffer, size_t size)
@@ -2112,9 +2204,9 @@ out:
 	return error;
 }
 
-static int shmem_show_options(struct seq_file *seq, struct vfsmount *vfs)
+static int shmem_show_options(struct seq_file *seq, struct dentry *root)
 {
-	struct shmem_sb_info *sbinfo = SHMEM_SB(vfs->mnt_sb);
+	struct shmem_sb_info *sbinfo = SHMEM_SB(root->d_sb);
 
 	if (sbinfo->max_blocks != shmem_default_max_blocks())
 		seq_printf(seq, ",size=%luk",
@@ -2122,7 +2214,7 @@ static int shmem_show_options(struct seq_file *seq, struct vfsmount *vfs)
 	if (sbinfo->max_inodes != shmem_default_max_inodes())
 		seq_printf(seq, ",nr_inodes=%lu", sbinfo->max_inodes);
 	if (sbinfo->mode != (S_IRWXUGO | S_ISVTX))
-		seq_printf(seq, ",mode=%03o", sbinfo->mode);
+		seq_printf(seq, ",mode=%03ho", sbinfo->mode);
 	if (sbinfo->uid != 0)
 		seq_printf(seq, ",uid=%u", sbinfo->uid);
 	if (sbinfo->gid != 0)
@@ -2144,7 +2236,6 @@ static void shmem_put_super(struct super_block *sb)
 int shmem_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *inode;
-	struct dentry *root;
 	struct shmem_sb_info *sbinfo;
 	int err = -ENOMEM;
 
@@ -2201,14 +2292,11 @@ int shmem_fill_super(struct super_block *sb, void *data, int silent)
 		goto failed;
 	inode->i_uid = sbinfo->uid;
 	inode->i_gid = sbinfo->gid;
-	root = d_alloc_root(inode);
-	if (!root)
-		goto failed_iput;
-	sb->s_root = root;
+	sb->s_root = d_make_root(inode);
+	if (!sb->s_root)
+		goto failed;
 	return 0;
 
-failed_iput:
-	iput(inode);
 failed:
 	shmem_put_super(sb);
 	return err;
@@ -2280,6 +2368,7 @@ static const struct file_operations shmem_file_operations = {
 	.fsync		= noop_fsync,
 	.splice_read	= shmem_file_splice_read,
 	.splice_write	= generic_file_splice_write,
+	.fallocate	= shmem_fallocate,
 #endif
 };
 
@@ -2497,7 +2586,7 @@ struct file *shmem_file_setup(const char *name, loff_t size, unsigned long flags
 
 	d_instantiate(path.dentry, inode);
 	inode->i_size = size;
-	inode->i_nlink = 0;	/* It is unlinked */
+	clear_nlink(inode);	/* It is unlinked */
 #ifndef CONFIG_MMU
 	error = ramfs_nommu_expand_for_mapping(inode, size);
 	if (error)

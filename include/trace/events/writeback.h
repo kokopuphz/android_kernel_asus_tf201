@@ -21,6 +21,16 @@
 		{I_REFERENCED,		"I_REFERENCED"}		\
 	)
 
+#define WB_WORK_REASON							\
+		{WB_REASON_BACKGROUND,		"background"},		\
+		{WB_REASON_TRY_TO_FREE_PAGES,	"try_to_free_pages"},	\
+		{WB_REASON_SYNC,		"sync"},		\
+		{WB_REASON_PERIODIC,		"periodic"},		\
+		{WB_REASON_LAPTOP_TIMER,	"laptop_timer"},	\
+		{WB_REASON_FREE_MORE_MEM,	"free_more_memory"},	\
+		{WB_REASON_FS_FREE_SPACE,	"fs_free_space"},	\
+		{WB_REASON_FORKER_THREAD,	"forker_thread"}
+
 struct wb_writeback_work;
 
 DECLARE_EVENT_CLASS(writeback_work_class,
@@ -34,25 +44,31 @@ DECLARE_EVENT_CLASS(writeback_work_class,
 		__field(int, for_kupdate)
 		__field(int, range_cyclic)
 		__field(int, for_background)
+		__field(int, reason)
 	),
 	TP_fast_assign(
-		strncpy(__entry->name, dev_name(bdi->dev), 32);
+		struct device *dev = bdi->dev;
+		if (!dev)
+			dev = default_backing_dev_info.dev;
+		strncpy(__entry->name, dev_name(dev), 32);
 		__entry->nr_pages = work->nr_pages;
 		__entry->sb_dev = work->sb ? work->sb->s_dev : 0;
 		__entry->sync_mode = work->sync_mode;
 		__entry->for_kupdate = work->for_kupdate;
 		__entry->range_cyclic = work->range_cyclic;
 		__entry->for_background	= work->for_background;
+		__entry->reason = work->reason;
 	),
 	TP_printk("bdi %s: sb_dev %d:%d nr_pages=%ld sync_mode=%d "
-		  "kupdate=%d range_cyclic=%d background=%d",
+		  "kupdate=%d range_cyclic=%d background=%d reason=%s",
 		  __entry->name,
 		  MAJOR(__entry->sb_dev), MINOR(__entry->sb_dev),
 		  __entry->nr_pages,
 		  __entry->sync_mode,
 		  __entry->for_kupdate,
 		  __entry->range_cyclic,
-		  __entry->for_background
+		  __entry->for_background,
+		  __print_symbolic(__entry->reason, WB_WORK_REASON)
 	)
 );
 #define DEFINE_WRITEBACK_WORK_EVENT(name) \
@@ -181,27 +197,32 @@ DEFINE_WBC_EVENT(wbc_writepage);
 
 TRACE_EVENT(writeback_queue_io,
 	TP_PROTO(struct bdi_writeback *wb,
-		 unsigned long *older_than_this,
+		 struct wb_writeback_work *work,
 		 int moved),
-	TP_ARGS(wb, older_than_this, moved),
+	TP_ARGS(wb, work, moved),
 	TP_STRUCT__entry(
 		__array(char,		name, 32)
 		__field(unsigned long,	older)
 		__field(long,		age)
 		__field(int,		moved)
+		__field(int,		reason)
 	),
 	TP_fast_assign(
+		unsigned long *older_than_this = work->older_than_this;
 		strncpy(__entry->name, dev_name(wb->bdi->dev), 32);
 		__entry->older	= older_than_this ?  *older_than_this : 0;
 		__entry->age	= older_than_this ?
 				  (jiffies - *older_than_this) * 1000 / HZ : -1;
 		__entry->moved	= moved;
+		__entry->reason	= work->reason;
 	),
-	TP_printk("bdi %s: older=%lu age=%ld enqueue=%d",
+	TP_printk("bdi %s: older=%lu age=%ld enqueue=%d reason=%s",
 		__entry->name,
 		__entry->older,	/* older_than_this in jiffies */
 		__entry->age,	/* older_than_this in relative milliseconds */
-		__entry->moved)
+		__entry->moved,
+		__print_symbolic(__entry->reason, WB_WORK_REASON)
+	)
 );
 
 TRACE_EVENT(global_dirty_state,

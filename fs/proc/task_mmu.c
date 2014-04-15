@@ -44,7 +44,6 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
 		"VmPeak:\t%8lu kB\n"
 		"VmSize:\t%8lu kB\n"
 		"VmLck:\t%8lu kB\n"
-		"VmPin:\t%8lu kB\n"
 		"VmHWM:\t%8lu kB\n"
 		"VmRSS:\t%8lu kB\n"
 		"VmData:\t%8lu kB\n"
@@ -56,7 +55,6 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
 		hiwater_vm << (PAGE_SHIFT-10),
 		(total_vm - mm->reserved_vm) << (PAGE_SHIFT-10),
 		mm->locked_vm << (PAGE_SHIFT-10),
-		mm->pinned_vm << (PAGE_SHIFT-10),
 		hiwater_rss << (PAGE_SHIFT-10),
 		total_rss << (PAGE_SHIFT-10),
 		data << (PAGE_SHIFT-10),
@@ -214,15 +212,12 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
 {
 	struct mm_struct *mm = vma->vm_mm;
 	struct file *file = vma->vm_file;
-	struct proc_maps_private *priv = m->private;
-	struct task_struct *task = priv->task;
 	vm_flags_t flags = vma->vm_flags;
 	unsigned long ino = 0;
 	unsigned long long pgoff = 0;
 	unsigned long start, end;
 	dev_t dev = 0;
 	int len;
-	const char *name = NULL;
 
 	if (file) {
 		struct inode *inode = vma->vm_file->f_path.dentry->d_inode;
@@ -256,46 +251,25 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
 	if (file) {
 		pad_len_spaces(m, len);
 		seq_path(m, &file->f_path, "\n");
-		goto done;
-	}
-
-	name = arch_vma_name(vma);
-	if (!name) {
-		pid_t tid;
-
-		if (!mm) {
-			name = "[vdso]";
-			goto done;
-		}
-
-		if (vma->vm_start <= mm->brk &&
-		    vma->vm_end >= mm->start_brk) {
-			name = "[heap]";
-			goto done;
-		}
-
-		tid = vm_is_stack(task, vma, is_pid);
-
-		if (tid != 0) {
-			/*
-			 * Thread stack in /proc/PID/task/TID/maps or
-			 * the main process stack.
-			 */
-			if (!is_pid || (vma->vm_start <= mm->start_stack &&
-			    vma->vm_end >= mm->start_stack)) {
-				name = "[stack]";
+	} else {
+		const char *name = arch_vma_name(vma);
+		if (!name) {
+			if (mm) {
+				if (vma->vm_start <= mm->brk &&
+						vma->vm_end >= mm->start_brk) {
+					name = "[heap]";
+				} else if (vma->vm_start <= mm->start_stack &&
+					   vma->vm_end >= mm->start_stack) {
+					name = "[stack]";
+				}
 			} else {
-				/* Thread stack in /proc/PID/maps */
-				pad_len_spaces(m, len);
-				seq_printf(m, "[stack:%d]", tid);
+				name = "[vdso]";
 			}
 		}
-	}
-
-done:
-	if (name) {
-		pad_len_spaces(m, len);
-		seq_puts(m, name);
+		if (name) {
+			pad_len_spaces(m, len);
+			seq_puts(m, name);
+		}
 	}
 	seq_putc(m, '\n');
 }
@@ -448,15 +422,21 @@ static int smaps_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	pte_t *pte;
 	spinlock_t *ptl;
 
-	if (pmd_trans_huge_lock(pmd, vma) == 1) {
-		smaps_pte_entry(*(pte_t *)pmd, addr, HPAGE_PMD_SIZE, walk);
+	spin_lock(&walk->mm->page_table_lock);
+	if (pmd_trans_huge(*pmd)) {
+		if (pmd_trans_splitting(*pmd)) {
+			spin_unlock(&walk->mm->page_table_lock);
+			wait_split_huge_page(vma->anon_vma, pmd);
+		} else {
+			smaps_pte_entry(*(pte_t *)pmd, addr,
+					HPAGE_PMD_SIZE, walk);
+			spin_unlock(&walk->mm->page_table_lock);
+			mss->anonymous_thp += HPAGE_PMD_SIZE;
+			return 0;
+		}
+	} else {
 		spin_unlock(&walk->mm->page_table_lock);
-		mss->anonymous_thp += HPAGE_PMD_SIZE;
-		return 0;
 	}
-
-	if (pmd_trans_unstable(pmd))
-		return 0;
 	/*
 	 * The mmap_sem held all the way back in m_start() is what
 	 * keeps khugepaged out of here and from collapsing things
@@ -584,8 +564,6 @@ static int clear_refs_pte_range(pmd_t *pmd, unsigned long addr,
 	struct page *page;
 
 	split_huge_page_pmd(walk->mm, pmd);
-	if (pmd_trans_unstable(pmd))
-		return 0;
 
 	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
 	for (; addr != end; pte++, addr += PAGE_SIZE) {
@@ -782,25 +760,10 @@ static int pagemap_pte_range(pmd_t *pmd, unsigned long addr, unsigned long end,
 	int err = 0;
 	pagemap_entry_t pme = make_pme(PM_NOT_PRESENT);
 
+	split_huge_page_pmd(walk->mm, pmd);
+
 	/* find the first VMA at or above 'addr' */
 	vma = find_vma(walk->mm, addr);
-	if (pmd_trans_huge_lock(pmd, vma) == 1) {
-		for (; addr != end; addr += PAGE_SIZE) {
-			unsigned long offset;
-
-			offset = (addr & ~PAGEMAP_WALK_MASK) >>
-					PAGE_SHIFT;
-			thp_pmd_to_pagemap_entry(&pme, *pmd, offset);
-			err = add_to_pagemap(addr, &pme, pm);
-			if (err)
-				break;
-		}
-		spin_unlock(&walk->mm->page_table_lock);
-		return err;
-	}
-
-	if (pmd_trans_unstable(pmd))
-		return 0;
 	for (; addr != end; addr += PAGE_SIZE) {
 
 		/* check to see if we've left 'vma' behind
@@ -1069,21 +1032,26 @@ static int gather_pte_stats(pmd_t *pmd, unsigned long addr,
 	pte_t *pte;
 
 	md = walk->private;
+	spin_lock(&walk->mm->page_table_lock);
+	if (pmd_trans_huge(*pmd)) {
+		if (pmd_trans_splitting(*pmd)) {
+			spin_unlock(&walk->mm->page_table_lock);
+			wait_split_huge_page(md->vma->anon_vma, pmd);
+		} else {
+			pte_t huge_pte = *(pte_t *)pmd;
+			struct page *page;
 
-	if (pmd_trans_huge_lock(pmd, md->vma) == 1) {
-		pte_t huge_pte = *(pte_t *)pmd;
-		struct page *page;
-
-		page = can_gather_numa_stats(huge_pte, md->vma, addr);
-		if (page)
-			gather_stats(page, md, pte_dirty(huge_pte),
-				     HPAGE_PMD_SIZE/PAGE_SIZE);
+			page = can_gather_numa_stats(huge_pte, md->vma, addr);
+			if (page)
+				gather_stats(page, md, pte_dirty(huge_pte),
+						HPAGE_PMD_SIZE/PAGE_SIZE);
+			spin_unlock(&walk->mm->page_table_lock);
+			return 0;
+		}
+	} else {
 		spin_unlock(&walk->mm->page_table_lock);
-		return 0;
 	}
 
-	if (pmd_trans_unstable(pmd))
-		return 0;
 	orig_pte = pte = pte_offset_map_lock(walk->mm, pmd, addr, &ptl);
 	do {
 		struct page *page = can_gather_numa_stats(*pte, md->vma, addr);
@@ -1162,19 +1130,9 @@ static int show_numa_map(struct seq_file *m, void *v, int is_pid)
 		seq_path(m, &file->f_path, "\n\t= ");
 	} else if (vma->vm_start <= mm->brk && vma->vm_end >= mm->start_brk) {
 		seq_printf(m, " heap");
-	} else {
-		pid_t tid = vm_is_stack(proc_priv->task, vma, is_pid);
-		if (tid != 0) {
-			/*
-			 * Thread stack in /proc/PID/task/TID/maps or
-			 * the main process stack.
-			 */
-			if (!is_pid || (vma->vm_start <= mm->start_stack &&
-			    vma->vm_end >= mm->start_stack))
-				seq_printf(m, " stack");
-			else
-				seq_printf(m, " stack:%d", tid);
-		}
+	} else if (vma->vm_start <= mm->start_stack &&
+			vma->vm_end >= mm->start_stack) {
+		seq_printf(m, " stack");
 	}
 
 	if (is_vm_hugetlb_page(vma))

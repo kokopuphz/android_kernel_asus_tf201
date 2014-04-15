@@ -296,6 +296,8 @@ extern long long simple_strtoll(const char *,char **,unsigned int);
 #define strict_strtoull	kstrtoull
 #define strict_strtoll	kstrtoll
 
+extern int num_to_str(char *buf, int size, unsigned long long num);
+
 extern int sprintf(char * buf, const char * fmt, ...)
 	__attribute__ ((format (printf, 2, 3)));
 extern int vsprintf(char *buf, const char *, va_list)
@@ -374,11 +376,16 @@ extern const char hex_asc[];
 #define hex_asc_lo(x)	hex_asc[((x) & 0x0f)]
 #define hex_asc_hi(x)	hex_asc[((x) & 0xf0) >> 4]
 
-static inline char *pack_hex_byte(char *buf, u8 byte)
+static inline char *hex_byte_pack(char *buf, u8 byte)
 {
 	*buf++ = hex_asc_hi(byte);
 	*buf++ = hex_asc_lo(byte);
 	return buf;
+}
+
+static inline char * __deprecated pack_hex_byte(char *buf, u8 byte)
+{
+	return hex_byte_pack(buf, byte);
 }
 
 extern int hex_to_bin(char ch);

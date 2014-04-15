@@ -1091,7 +1091,7 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 			return SECCLASS_NETLINK_ROUTE_SOCKET;
 		case NETLINK_FIREWALL:
 			return SECCLASS_NETLINK_FIREWALL_SOCKET;
-		case NETLINK_SOCK_DIAG:
+		case NETLINK_INET_DIAG:
 			return SECCLASS_NETLINK_TCPDIAG_SOCKET;
 		case NETLINK_NFLOG:
 			return SECCLASS_NETLINK_NFLOG_SOCKET;
@@ -3589,7 +3589,6 @@ static int selinux_parse_skb_ipv6(struct sk_buff *skb,
 	u8 nexthdr;
 	int ret = -EINVAL, offset;
 	struct ipv6hdr _ipv6h, *ip6;
-	__be16 frag_off;
 
 	offset = skb_network_offset(skb);
 	ip6 = skb_header_pointer(skb, offset, sizeof(_ipv6h), &_ipv6h);
@@ -3602,7 +3601,7 @@ static int selinux_parse_skb_ipv6(struct sk_buff *skb,
 
 	nexthdr = ip6->nexthdr;
 	offset += sizeof(_ipv6h);
-	offset = ipv6_skip_exthdr(skb, offset, &nexthdr, &frag_off);
+	offset = ipv6_skip_exthdr(skb, offset, &nexthdr);
 	if (offset < 0)
 		goto out;
 

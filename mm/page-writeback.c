@@ -738,7 +738,8 @@ static void balance_dirty_pages(struct address_space *mapping,
 		trace_balance_dirty_start(bdi);
 		if (bdi_nr_reclaimable > task_bdi_thresh) {
 			pages_written += writeback_inodes_wb(&bdi->wb,
-							     write_chunk);
+							     write_chunk,
+							     WB_REASON_SYNC);
 			trace_balance_dirty_written(bdi, pages_written);
 			if (pages_written >= write_chunk)
 				break;		/* We've done our duty */
@@ -898,7 +899,8 @@ void laptop_mode_timer_fn(unsigned long data)
 	 * threshold
 	 */
 	if (bdi_has_dirty_io(&q->backing_dev_info))
-		bdi_start_writeback(&q->backing_dev_info, nr_pages);
+		bdi_start_writeback(&q->backing_dev_info, nr_pages,
+					WB_REASON_LAPTOP_TIMER);
 }
 
 /*

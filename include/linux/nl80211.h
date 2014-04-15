@@ -616,6 +616,17 @@ enum nl80211_commands {
 
 	NL80211_CMD_SET_REKEY_OFFLOAD,
 
+	NL80211_CMD_PMKSA_CANDIDATE,
+
+	NL80211_CMD_TDLS_OPER,
+	NL80211_CMD_TDLS_MGMT,
+
+	NL80211_CMD_UNEXPECTED_FRAME,
+
+	NL80211_CMD_PROBE_CLIENT,
+
+	NL80211_CMD_REGISTER_BEACONS,
+
 	/* add new commands above here */
 
 	/* used to define NL80211_CMD_MAX below */
@@ -1260,6 +1271,18 @@ enum nl80211_attrs {
 
 	NL80211_ATTR_SCHED_SCAN_MATCH,
 	NL80211_ATTR_MAX_MATCH_SETS,
+
+	NL80211_ATTR_PMKSA_CANDIDATE,
+
+	NL80211_ATTR_TX_NO_CCK_RATE,
+
+	NL80211_ATTR_TDLS_ACTION,
+	NL80211_ATTR_TDLS_DIALOG_TOKEN,
+	NL80211_ATTR_TDLS_OPERATION,
+	NL80211_ATTR_TDLS_SUPPORT,
+	NL80211_ATTR_TDLS_EXTERNAL_SETUP,
+
+	NL80211_ATTR_DEVICE_AP_SME,
 
 	/* add attributes here, update the policy in nl80211.c */
 
@@ -2498,5 +2521,87 @@ enum nl80211_rekey_data {
 	NUM_NL80211_REKEY_DATA,
 	MAX_NL80211_REKEY_DATA = NUM_NL80211_REKEY_DATA - 1
 };
+
+/**
+ * enum nl80211_hidden_ssid - values for %NL80211_ATTR_HIDDEN_SSID
+ * @NL80211_HIDDEN_SSID_NOT_IN_USE: do not hide SSID (i.e., broadcast it in
+ *	Beacon frames)
+ * @NL80211_HIDDEN_SSID_ZERO_LEN: hide SSID by using zero-length SSID element
+ *	in Beacon frames
+ * @NL80211_HIDDEN_SSID_ZERO_CONTENTS: hide SSID by using correct length of SSID
+ *	element in Beacon frames but zero out each byte in the SSID
+ */
+enum nl80211_hidden_ssid {
+	NL80211_HIDDEN_SSID_NOT_IN_USE,
+	NL80211_HIDDEN_SSID_ZERO_LEN,
+	NL80211_HIDDEN_SSID_ZERO_CONTENTS
+};
+
+/**
+ * enum nl80211_sta_wme_attr - station WME attributes
+ * @__NL80211_STA_WME_INVALID: invalid number for nested attribute
+ * @NL80211_STA_WME_UAPSD_QUEUES: bitmap of uapsd queues. the format
+ *	is the same as the AC bitmap in the QoS info field.
+ * @NL80211_STA_WME_MAX_SP: max service period. the format is the same
+ *	as the MAX_SP field in the QoS info field (but already shifted down).
+ * @__NL80211_STA_WME_AFTER_LAST: internal
+ * @NL80211_STA_WME_MAX: highest station WME attribute
+ */
+enum nl80211_sta_wme_attr {
+	__NL80211_STA_WME_INVALID,
+	NL80211_STA_WME_UAPSD_QUEUES,
+	NL80211_STA_WME_MAX_SP,
+
+	/* keep last */
+	__NL80211_STA_WME_AFTER_LAST,
+	NL80211_STA_WME_MAX = __NL80211_STA_WME_AFTER_LAST - 1
+};
+
+/**
+ * enum nl80211_pmksa_candidate_attr - attributes for PMKSA caching candidates
+ * @__NL80211_PMKSA_CANDIDATE_INVALID: invalid number for nested attributes
+ * @NL80211_PMKSA_CANDIDATE_INDEX: candidate index (u32; the smaller, the higher
+ *	priority)
+ * @NL80211_PMKSA_CANDIDATE_BSSID: candidate BSSID (6 octets)
+ * @NL80211_PMKSA_CANDIDATE_PREAUTH: RSN pre-authentication supported (flag)
+ * @NUM_NL80211_PMKSA_CANDIDATE: number of PMKSA caching candidate attributes
+ *	(internal)
+ * @MAX_NL80211_PMKSA_CANDIDATE: highest PMKSA caching candidate attribute
+ *	(internal)
+ */
+enum nl80211_pmksa_candidate_attr {
+	__NL80211_PMKSA_CANDIDATE_INVALID,
+	NL80211_PMKSA_CANDIDATE_INDEX,
+	NL80211_PMKSA_CANDIDATE_BSSID,
+	NL80211_PMKSA_CANDIDATE_PREAUTH,
+
+	/* keep last */
+	NUM_NL80211_PMKSA_CANDIDATE,
+	MAX_NL80211_PMKSA_CANDIDATE = NUM_NL80211_PMKSA_CANDIDATE - 1
+};
+
+/**
+ * enum nl80211_tdls_operation - values for %NL80211_ATTR_TDLS_OPERATION
+ * @NL80211_TDLS_DISCOVERY_REQ: Send a TDLS discovery request
+ * @NL80211_TDLS_SETUP: Setup TDLS link
+ * @NL80211_TDLS_TEARDOWN: Teardown a TDLS link which is already established
+ * @NL80211_TDLS_ENABLE_LINK: Enable TDLS link
+ * @NL80211_TDLS_DISABLE_LINK: Disable TDLS link
+ */
+enum nl80211_tdls_operation {
+	NL80211_TDLS_DISCOVERY_REQ,
+	NL80211_TDLS_SETUP,
+	NL80211_TDLS_TEARDOWN,
+	NL80211_TDLS_ENABLE_LINK,
+	NL80211_TDLS_DISABLE_LINK,
+};
+
+/*
+ * enum nl80211_ap_sme_features - device-integrated AP features
+ * Reserved for future use, no bits are defined in
+ * NL80211_ATTR_DEVICE_AP_SME yet.
+enum nl80211_ap_sme_features {
+};
+ */
 
 #endif /* __LINUX_NL80211_H */

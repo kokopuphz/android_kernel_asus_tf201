@@ -51,6 +51,8 @@
 #include <trace/events/sched.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/oom.h>
+#include <linux/writeback.h>
+#include <linux/shm.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -472,7 +474,7 @@ static void close_files(struct files_struct * files)
 		i = j * __NFDBITS;
 		if (i >= fdt->max_fds)
 			break;
-		set = fdt->open_fds->fds_bits[j++];
+		set = fdt->open_fds[j++];
 		while (set) {
 			if (set & 1) {
 				struct file * file = xchg(&fdt->fd[i], NULL);

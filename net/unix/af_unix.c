@@ -115,8 +115,10 @@
 #include <net/checksum.h>
 #include <linux/security.h>
 
-static struct hlist_head unix_socket_table[UNIX_HASH_SIZE + 1];
-static DEFINE_SPINLOCK(unix_table_lock);
+struct hlist_head unix_socket_table[UNIX_HASH_SIZE + 1];
+EXPORT_SYMBOL_GPL(unix_socket_table);
+DEFINE_SPINLOCK(unix_table_lock);
+EXPORT_SYMBOL_GPL(unix_table_lock);
 static atomic_long_t unix_nr_socks;
 
 #define unix_sockets_unbound	(&unix_socket_table[UNIX_HASH_SIZE])
@@ -172,7 +174,7 @@ static inline int unix_recvq_full(struct sock const *sk)
 	return skb_queue_len(&sk->sk_receive_queue) > sk->sk_max_ack_backlog;
 }
 
-static struct sock *unix_peer_get(struct sock *s)
+struct sock *unix_peer_get(struct sock *s)
 {
 	struct sock *peer;
 
@@ -183,6 +185,7 @@ static struct sock *unix_peer_get(struct sock *s)
 	unix_state_unlock(s);
 	return peer;
 }
+EXPORT_SYMBOL_GPL(unix_peer_get);
 
 static inline void unix_release_addr(struct unix_address *addr)
 {
@@ -290,7 +293,7 @@ static struct sock *unix_find_socket_byinode(struct inode *i)
 	spin_lock(&unix_table_lock);
 	sk_for_each(s, node,
 		    &unix_socket_table[i->i_ino & (UNIX_HASH_SIZE - 1)]) {
-		struct dentry *dentry = unix_sk(s)->dentry;
+		struct dentry *dentry = unix_sk(s)->path.dentry;
 
 		if (dentry && dentry->d_inode == i) {
 			sock_hold(s);
@@ -374,8 +377,7 @@ static void unix_sock_destructor(struct sock *sk)
 static int unix_release_sock(struct sock *sk, int embrion)
 {
 	struct unix_sock *u = unix_sk(sk);
-	struct dentry *dentry;
-	struct vfsmount *mnt;
+	struct path path;
 	struct sock *skpair;
 	struct sk_buff *skb;
 	int state;
@@ -386,10 +388,9 @@ static int unix_release_sock(struct sock *sk, int embrion)
 	unix_state_lock(sk);
 	sock_orphan(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
-	dentry	     = u->dentry;
-	u->dentry    = NULL;
-	mnt	     = u->mnt;
-	u->mnt	     = NULL;
+	path	     = u->path;
+	u->path.dentry = NULL;
+	u->path.mnt = NULL;
 	state = sk->sk_state;
 	sk->sk_state = TCP_CLOSE;
 	unix_state_unlock(sk);
@@ -422,10 +423,8 @@ static int unix_release_sock(struct sock *sk, int embrion)
 		kfree_skb(skb);
 	}
 
-	if (dentry) {
-		dput(dentry);
-		mntput(mnt);
-	}
+	if (path.dentry)
+		path_put(&path);
 
 	sock_put(sk);
 
@@ -625,8 +624,8 @@ static struct sock *unix_create1(struct net *net, struct socket *sock)
 	sk->sk_max_ack_backlog	= net->unx.sysctl_max_dgram_qlen;
 	sk->sk_destruct		= unix_sock_destructor;
 	u	  = unix_sk(sk);
-	u->dentry = NULL;
-	u->mnt	  = NULL;
+	u->path.dentry = NULL;
+	u->path.mnt = NULL;
 	spin_lock_init(&u->lock);
 	atomic_long_set(&u->inflight, 0);
 	INIT_LIST_HEAD(&u->link);
@@ -772,7 +771,7 @@ static struct sock *unix_find_other(struct net *net,
 			goto put_fail;
 
 		if (u->sk_type == type)
-			touch_atime(path.mnt, path.dentry);
+			touch_atime(&path);
 
 		path_put(&path);
 
@@ -786,9 +785,9 @@ static struct sock *unix_find_other(struct net *net,
 		u = unix_find_socket_byname(net, sunname, len, type, hash);
 		if (u) {
 			struct dentry *dentry;
-			dentry = unix_sk(u)->dentry;
+			dentry = unix_sk(u)->path.dentry;
 			if (dentry)
-				touch_atime(unix_sk(u)->mnt, dentry);
+				touch_atime(&unix_sk(u)->path);
 		} else
 			goto fail;
 	}
@@ -847,7 +846,7 @@ static int unix_bind(struct socket *sock, struct sockaddr *uaddr, int addr_len)
 	atomic_set(&addr->refcnt, 1);
 
 	if (sun_path[0]) {
-		unsigned int mode;
+		umode_t mode;
 		err = 0;
 		/*
 		 * Get the parent directory, calculate the hash for last
@@ -894,8 +893,7 @@ out_mknod_drop_write:
 		list = &unix_socket_table[addr->hash];
 	} else {
 		list = &unix_socket_table[dentry->d_inode->i_ino & (UNIX_HASH_SIZE-1)];
-		u->dentry = path.dentry;
-		u->mnt    = path.mnt;
+		u->path = path;
 	}
 
 	err = 0;
@@ -1177,9 +1175,9 @@ restart:
 		atomic_inc(&otheru->addr->refcnt);
 		newu->addr = otheru->addr;
 	}
-	if (otheru->dentry) {
-		newu->dentry	= dget(otheru->dentry);
-		newu->mnt	= mntget(otheru->mnt);
+	if (otheru->path.dentry) {
+		path_get(&otheru->path);
+		newu->path = otheru->path;
 	}
 
 	/* Set credentials */
@@ -1381,14 +1379,34 @@ static int unix_attach_fds(struct scm_cookie *scm, struct sk_buff *skb)
 static int unix_scm_to_skb(struct scm_cookie *scm, struct sk_buff *skb, bool send_fds)
 {
 	int err = 0;
+
 	UNIXCB(skb).pid  = get_pid(scm->pid);
-	UNIXCB(skb).cred = get_cred(scm->cred);
+	if (scm->cred)
+		UNIXCB(skb).cred = get_cred(scm->cred);
 	UNIXCB(skb).fp = NULL;
 	if (scm->fp && send_fds)
 		err = unix_attach_fds(scm, skb);
 
 	skb->destructor = unix_destruct_scm;
 	return err;
+}
+
+/*
+ * Some apps rely on write() giving SCM_CREDENTIALS
+ * We include credentials if source or destination socket
+ * asserted SOCK_PASSCRED.
+ */
+static void maybe_add_creds(struct sk_buff *skb, const struct socket *sock,
+			    const struct sock *other)
+{
+	if (UNIXCB(skb).cred)
+		return;
+	if (test_bit(SOCK_PASSCRED, &sock->flags) ||
+	    !other->sk_socket ||
+	    test_bit(SOCK_PASSCRED, &other->sk_socket->flags)) {
+		UNIXCB(skb).pid  = get_pid(task_tgid(current));
+		UNIXCB(skb).cred = get_current_cred();
+	}
 }
 
 /*
@@ -1538,6 +1556,7 @@ restart:
 
 	if (sock_flag(other, SOCK_RCVTSTAMP))
 		__net_timestamp(skb);
+	maybe_add_creds(skb, sock, other);
 	skb_queue_tail(&other->sk_receive_queue, skb);
 	if (max_level > unix_sk(other)->recursion_level)
 		unix_sk(other)->recursion_level = max_level;
@@ -1652,6 +1671,7 @@ static int unix_stream_sendmsg(struct kiocb *kiocb, struct socket *sock,
 		    (other->sk_shutdown & RCV_SHUTDOWN))
 			goto pipe_err_free;
 
+		maybe_add_creds(skb, sock, other);
 		skb_queue_tail(&other->sk_receive_queue, skb);
 		if (max_level > unix_sk(other)->recursion_level)
 			unix_sk(other)->recursion_level = max_level;
@@ -2144,7 +2164,7 @@ static unsigned int unix_dgram_poll(struct file *file, struct socket *sock,
 	}
 
 	/* No write status requested, avoid expensive OUT tests. */
-	if (wait && !(wait->key & (POLLWRBAND | POLLWRNORM | POLLOUT)))
+	if (!(poll_requested_events(wait) & (POLLWRBAND|POLLWRNORM|POLLOUT)))
 		return mask;
 
 	writable = unix_writable(sk);

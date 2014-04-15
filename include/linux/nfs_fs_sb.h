@@ -88,7 +88,6 @@ struct nfs_client {
 
 	struct server_scope	*server_scope;	/* from exchange_id */
 	struct nfs41_impl_id	*impl_id;	/* from exchange_id */
-	struct net		*net;
 };
 
 /*

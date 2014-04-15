@@ -47,7 +47,7 @@ struct nsm_res {
 	u32			state;
 };
 
-static const struct rpc_program	nsm_program;
+static struct rpc_program	nsm_program;
 static				LIST_HEAD(nsm_handles);
 static				DEFINE_SPINLOCK(nsm_lock);
 
@@ -62,14 +62,14 @@ static inline struct sockaddr *nsm_addr(const struct nsm_handle *nsm)
 	return (struct sockaddr *)&nsm->sm_addr;
 }
 
-static struct rpc_clnt *nsm_create(struct net *net)
+static struct rpc_clnt *nsm_create(void)
 {
 	struct sockaddr_in sin = {
 		.sin_family		= AF_INET,
 		.sin_addr.s_addr	= htonl(INADDR_LOOPBACK),
 	};
 	struct rpc_create_args args = {
-		.net			= net,
+		.net			= &init_net,
 		.protocol		= XPRT_TRANSPORT_UDP,
 		.address		= (struct sockaddr *)&sin,
 		.addrsize		= sizeof(sin),
@@ -83,8 +83,7 @@ static struct rpc_clnt *nsm_create(struct net *net)
 	return rpc_create(&args);
 }
 
-static int nsm_mon_unmon(struct nsm_handle *nsm, u32 proc, struct nsm_res *res,
-			 struct net *net)
+static int nsm_mon_unmon(struct nsm_handle *nsm, u32 proc, struct nsm_res *res)
 {
 	struct rpc_clnt	*clnt;
 	int		status;
@@ -100,7 +99,7 @@ static int nsm_mon_unmon(struct nsm_handle *nsm, u32 proc, struct nsm_res *res,
 		.rpc_resp	= res,
 	};
 
-	clnt = nsm_create(net);
+	clnt = nsm_create();
 	if (IS_ERR(clnt)) {
 		status = PTR_ERR(clnt);
 		dprintk("lockd: failed to create NSM upcall transport, "
@@ -150,7 +149,7 @@ int nsm_monitor(const struct nlm_host *host)
 	 */
 	nsm->sm_mon_name = nsm_use_hostnames ? nsm->sm_name : nsm->sm_addrbuf;
 
-	status = nsm_mon_unmon(nsm, NSMPROC_MON, &res, host->net);
+	status = nsm_mon_unmon(nsm, NSMPROC_MON, &res);
 	if (unlikely(res.status != 0))
 		status = -EIO;
 	if (unlikely(status < 0)) {
@@ -184,7 +183,7 @@ void nsm_unmonitor(const struct nlm_host *host)
 	 && nsm->sm_monitored && !nsm->sm_sticky) {
 		dprintk("lockd: nsm_unmonitor(%s)\n", nsm->sm_name);
 
-		status = nsm_mon_unmon(nsm, NSMPROC_UNMON, &res, host->net);
+		status = nsm_mon_unmon(nsm, NSMPROC_UNMON, &res);
 		if (res.status != 0)
 			status = -EIO;
 		if (status < 0)
@@ -535,19 +534,19 @@ static struct rpc_procinfo	nsm_procedures[] = {
 	},
 };
 
-static const struct rpc_version nsm_version1 = {
+static struct rpc_version	nsm_version1 = {
 		.number		= 1,
 		.nrprocs	= ARRAY_SIZE(nsm_procedures),
 		.procs		= nsm_procedures
 };
 
-static const struct rpc_version *nsm_version[] = {
+static struct rpc_version *	nsm_version[] = {
 	[1] = &nsm_version1,
 };
 
 static struct rpc_stat		nsm_stats;
 
-static const struct rpc_program nsm_program = {
+static struct rpc_program	nsm_program = {
 		.name		= "statd",
 		.number		= NSM_PROGRAM,
 		.nrvers		= ARRAY_SIZE(nsm_version),

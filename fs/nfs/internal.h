@@ -123,7 +123,6 @@ struct nfs_parsed_mount_data {
 	} nfs_server;
 
 	struct security_mnt_opts lsm_opts;
-	struct net		*net;
 };
 
 /* mount_clnt.c */
@@ -138,22 +137,20 @@ struct nfs_mount_request {
 	int			noresvport;
 	unsigned int		*auth_flav_len;
 	rpc_authflavor_t	*auth_flavs;
-	struct net		*net;
 };
 
 extern int nfs_mount(struct nfs_mount_request *info);
 extern void nfs_umount(const struct nfs_mount_request *info);
 
 /* client.c */
-extern const struct rpc_program nfs_program;
-extern void nfs_clients_init(struct net *net);
+extern struct rpc_program nfs_program;
 
-extern void nfs_cleanup_cb_ident_idr(struct net *);
+extern void nfs_cleanup_cb_ident_idr(void);
 extern void nfs_put_client(struct nfs_client *);
-extern struct nfs_client *nfs4_find_client_ident(struct net *, int);
+extern struct nfs_client *nfs4_find_client_no_ident(const struct sockaddr *);
+extern struct nfs_client *nfs4_find_client_ident(int);
 extern struct nfs_client *
-nfs4_find_client_sessionid(struct net *, const struct sockaddr *,
-				struct nfs4_sessionid *);
+nfs4_find_client_sessionid(const struct sockaddr *, struct nfs4_sessionid *);
 extern struct nfs_server *nfs_create_server(
 					const struct nfs_parsed_mount_data *,
 					struct nfs_fh *);
@@ -165,8 +162,7 @@ extern struct nfs_server *nfs4_create_referral_server(struct nfs_clone_mount *,
 extern void nfs_free_server(struct nfs_server *server);
 extern struct nfs_server *nfs_clone_server(struct nfs_server *,
 					   struct nfs_fh *,
-					   struct nfs_fattr *,
-					   rpc_authflavor_t);
+					   struct nfs_fattr *);
 extern void nfs_mark_client_ready(struct nfs_client *clp, int state);
 extern int nfs4_check_client_ready(struct nfs_client *clp);
 extern struct nfs_client *nfs4_set_ds_client(struct nfs_client* mds_clp,
