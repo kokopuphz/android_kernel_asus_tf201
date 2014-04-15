@@ -839,7 +839,8 @@ out:
 
 redirty_out:
 	wbc->pages_skipped++;
-	account_page_redirty(page);
+	//below not needed for mm on 3.1
+	//account_page_redirty(page);
 	set_page_dirty(page);
 	return AOP_WRITEPAGE_ACTIVATE;
 }

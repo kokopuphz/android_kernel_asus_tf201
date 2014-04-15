@@ -176,7 +176,8 @@ no_write:
 redirty_out:
 	dec_page_count(sbi, F2FS_DIRTY_META);
 	wbc->pages_skipped++;
-	account_page_redirty(page);
+	//below not needed for mm on 3.1
+	//account_page_redirty(page);
 	set_page_dirty(page);
 	return AOP_WRITEPAGE_ACTIVATE;
 }

@@ -32,6 +32,10 @@
 #include <linux/mempolicy.h>
 #include <linux/security.h>
 #include <linux/ptrace.h>
+#include <linux/ftrace.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/oom.h>
 
 int sysctl_panic_on_oom;
 int sysctl_oom_kill_allocating_task;
@@ -59,6 +63,7 @@ int test_set_oom_score_adj(int new_val)
 		else if (old_val == OOM_SCORE_ADJ_MIN)
 			atomic_dec(&current->mm->oom_disable_count);
 		current->signal->oom_score_adj = new_val;
+		trace_oom_score_adj_update(current);
 	}
 	spin_unlock_irq(&sighand->siglock);
 

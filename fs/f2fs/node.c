@@ -1229,7 +1229,8 @@ static int f2fs_write_node_page(struct page *page,
 redirty_out:
 	dec_page_count(sbi, F2FS_DIRTY_NODES);
 	wbc->pages_skipped++;
-	account_page_redirty(page);
+	//below not needed for mm on 3.1
+	//account_page_redirty(page);
 	set_page_dirty(page);
 	return AOP_WRITEPAGE_ACTIVATE;
 }
