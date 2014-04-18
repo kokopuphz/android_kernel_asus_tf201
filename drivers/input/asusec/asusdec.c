@@ -128,7 +128,7 @@ extern unsigned int factory_mode;
  * global variable
  */
 bool isDockIn = 0;
-char* switch_value[]={"0", "10", "11", "12"}; //0: no dock, 1:mobile dock, 2:audio dock, 3: audio stand
+int switch_value[]={0, 10, 11, 12}; //0: no dock, 1:mobile dock, 2:audio dock, 3: audio stand
 
 EXPORT_SYMBOL(isDockIn);
 
