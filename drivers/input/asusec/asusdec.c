@@ -1624,12 +1624,19 @@ static void asusdec_dock_init_work_function(struct work_struct *dat)
 			ASUSDEC_NOTICE("Dock-in detected\n");
 			if (gpio_get_value(asusdec_hall_sensor_gpio) || (!ec_chip->status)){
 				if (ec_chip->init_success == 0){
+					ASUSDEC_NOTICE("init_success is 0\n");
 					if ((!ec_chip->tf_dock) || (!ec_chip->dock_behavior)){
+						ASUSDEC_NOTICE("executing asusdec_reset_dock 0\n");
 						ec_chip->susb_on = 1;
 						ec_chip->dock_type = DOCK_UNKNOWN;
 						msleep(200);
 						asusdec_reset_dock();
+					} else {
+						ASUSDEC_NOTICE("ec_chip ret: tfdock:%x dockbeh:%x\n",
+								ec_chip->tf_dock, ec_chip->dock_behavior);
 					}
+				} else {
+					ASUSDEC_NOTICE("init_success is NOT 0\n");
 				}
 			} else {
 				ASUSDEC_NOTICE("Keyboard is closed\n");
