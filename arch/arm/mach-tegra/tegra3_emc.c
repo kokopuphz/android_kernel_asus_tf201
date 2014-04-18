@@ -1062,7 +1062,7 @@ int tegra_init_emc(const struct tegra_emc_table *table, int table_size)
 	default:
 		pr_err("tegra: invalid EMC DFS table: unknown rev 0x%x\n",
 			table[0].rev);
-		return;
+		return 0;
 	}
 
 	/* Match EMC source/divider settings with table entries */
@@ -1090,7 +1090,7 @@ int tegra_init_emc(const struct tegra_emc_table *table, int table_size)
 	if (!max_entry) {
 		pr_err("tegra: invalid EMC DFS table: entry for max rate"
 		       " %lu kHz is not found\n", max_rate);
-		return;
+		return 0;
 	}
 
 	tegra_emc_table = table;
