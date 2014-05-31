@@ -75,6 +75,12 @@ struct backlight_properties {
 	/* Flags used to signal drivers of state changes */
 	/* Upper 4 bits are reserved for driver internal use */
 	unsigned int state;
+#ifdef CONFIG_MACH_ENDEAVORU
+	/* Backlight on/off flag for supend/resume */
+	int bkl_on;
+	/* lauch camer default bkl */
+	int cam_launch_bkl_value;
+#endif
 
 #define BL_CORE_SUSPENDED	(1 << 0)	/* backlight is suspended */
 #define BL_CORE_FBBLANK		(1 << 1)	/* backlight is under an fb blank event */

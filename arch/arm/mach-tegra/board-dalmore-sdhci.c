@@ -1,8 +1,8 @@
 /*
  * arch/arm/mach-tegra/board-dalmore-sdhci.c
  *
- * Copyright (c) 2010, Google, Inc.
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2010 Google, Inc.
+ * Copyright (C) 2013 NVIDIA Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -37,7 +37,7 @@
 #include "gpio-names.h"
 #include "board.h"
 #include "board-dalmore.h"
-#include "dvfs.h"
+
 
 #define DALMORE_WLAN_PWR	TEGRA_GPIO_PCC5
 #define DALMORE_WLAN_RST	TEGRA_GPIO_PX7
@@ -150,7 +150,6 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
 	.trim_delay = 0x2,
 	.ddr_clk_limit = 41000000,
 	.max_clk_limit = 82000000,
-	.uhs_mask = MMC_UHS_MASK_DDR50,
 };
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
@@ -162,8 +161,6 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
 	.ddr_clk_limit = 41000000,
 	.max_clk_limit = 82000000,
 	.sd_detect_in_suspend = 1,
-	.uhs_mask = MMC_UHS_MASK_DDR50,
-	.power_off_rail = true,
 };
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
@@ -174,11 +171,10 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
 	.tap_delay = 0x5,
 	.trim_delay = 0,
 	.ddr_clk_limit = 41000000,
-	.max_clk_limit = 156000000,
 	.mmc_data = {
 		.built_in = 1,
 		.ocr_mask = MMC_OCR_1V8_MASK,
-	},
+	}
 };
 
 static struct platform_device tegra_sdhci_device0 = {
@@ -390,24 +386,15 @@ subsys_initcall_sync(dalmore_wifi_prepower);
 
 int __init dalmore_sdhci_init(void)
 {
-	int nominal_core_mv;
-	int min_vcore_override_mv;
+	struct board_info board_info;
 
-	nominal_core_mv =
-		tegra_dvfs_rail_get_nominal_millivolts(tegra_core_rail);
-	if (nominal_core_mv) {
-		tegra_sdhci_platform_data0.nominal_vcore_mv = nominal_core_mv;
-		tegra_sdhci_platform_data3.nominal_vcore_mv = nominal_core_mv;
+	tegra_get_board_info(&board_info);
+	if (board_info.board_id == BOARD_E1611) {
+		tegra_sdhci_platform_data2.uhs_mask = MMC_UHS_MASK_SDR104 |
+				MMC_UHS_MASK_DDR50 | MMC_UHS_MASK_SDR50;
+		tegra_sdhci_platform_data0.uhs_mask = MMC_UHS_MASK_SDR104 |
+				MMC_UHS_MASK_DDR50 | MMC_UHS_MASK_SDR50;
 	}
-	min_vcore_override_mv =
-		tegra_dvfs_rail_get_override_floor(tegra_core_rail);
-	if (min_vcore_override_mv) {
-		tegra_sdhci_platform_data0.min_vcore_override_mv =
-			min_vcore_override_mv;
-		tegra_sdhci_platform_data3.min_vcore_override_mv =
-			min_vcore_override_mv;
-	}
-
 	platform_device_register(&tegra_sdhci_device3);
 	platform_device_register(&tegra_sdhci_device2);
 	platform_device_register(&tegra_sdhci_device0);

@@ -144,66 +144,6 @@ struct tegra_dc_feature t30_feature_table_b = {
 	ARRAY_SIZE(t30_feature_entries_b), t30_feature_entries_b,
 };
 
-static struct tegra_dc_feature_entry t114_feature_entries_a[] = {
-	{ 0, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 0, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 0, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 0, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 0, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-
-	{ 1, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 1, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 1, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 1, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 1, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-
-	{ 2, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 2, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 2, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 2, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 2, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-};
-
-static struct tegra_dc_feature_entry t114_feature_entries_b[] = {
-	{ 0, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 0, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 0, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 0, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 0, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 0, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-
-	{ 1, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 1, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 1, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 1, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 1, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 1, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-
-	{ 2, TEGRA_DC_FEATURE_FORMATS, {TEGRA_WIN_FMT_BASE,} },
-	{ 2, TEGRA_DC_FEATURE_BLEND_TYPE, {1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SIZE, {4095, 1, 4095, 1,} },
-	{ 2, TEGRA_DC_FEATURE_MAXIMUM_SCALE, {2, 2, 2, 2,} },
-	{ 2, TEGRA_DC_FEATURE_FILTER_TYPE, {1, 1,} },
-	{ 2, TEGRA_DC_FEATURE_LAYOUT_TYPE, {1, 1,} },
-	{ 2, TEGRA_DC_FEATURE_INVERT_TYPE, {1, 1, 1,} },
-};
-
-struct tegra_dc_feature t114_feature_table_a = {
-	ARRAY_SIZE(t114_feature_entries_a), t114_feature_entries_a,
-};
-
-struct tegra_dc_feature t114_feature_table_b = {
-	ARRAY_SIZE(t114_feature_entries_b), t114_feature_entries_b,
-};
-
 int tegra_dc_get_feature(struct tegra_dc_feature *feature, int win_idx,
 					enum tegra_dc_feature_option option)
 {
@@ -269,7 +209,7 @@ int tegra_dc_feature_has_scaling(struct tegra_dc *dc, int win_idx)
 	long *addr = tegra_dc_parse_feature(dc, win_idx, HAS_SCALE);
 
 	for (i = 0; i < ENTRY_SIZE; i++)
-		if (addr[i] != 1)
+		if (addr && addr[i] != 1)
 			return 1;
 	return 0;
 }
@@ -277,8 +217,7 @@ int tegra_dc_feature_has_scaling(struct tegra_dc *dc, int win_idx)
 int tegra_dc_feature_has_tiling(struct tegra_dc *dc, int win_idx)
 {
 	long *addr = tegra_dc_parse_feature(dc, win_idx, HAS_TILED);
-
-	return addr[TILED_LAYOUT];
+	return addr ? addr[TILED_LAYOUT] : -EINVAL;
 }
 
 int tegra_dc_feature_has_filter(struct tegra_dc *dc, int win_idx, int operation)
@@ -286,25 +225,13 @@ int tegra_dc_feature_has_filter(struct tegra_dc *dc, int win_idx, int operation)
 	long *addr = tegra_dc_parse_feature(dc, win_idx, operation);
 
 	if (operation == HAS_V_FILTER)
-		return addr[V_FILTER];
+		return addr ? addr[V_FILTER] : -EINVAL;
 	else
-		return addr[H_FILTER];
-}
-
-int tegra_dc_feature_is_gen2_blender(struct tegra_dc *dc, int win_idx)
-{
-	long *addr = tegra_dc_parse_feature(dc, win_idx, HAS_GEN2_BLEND);
-
-	if (addr[BLEND_GENERATION] == 2)
-		return 1;
-
-	return 0;
+		return addr ? addr[H_FILTER] : -EINVAL;
 }
 
 void tegra_dc_feature_register(struct tegra_dc *dc)
 {
-	int i;
-	struct tegra_dc_feature_entry *entry;
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC)
 	if (!dc->ndev->id)
 		dc->feature = &t20_feature_table_a;
@@ -315,18 +242,5 @@ void tegra_dc_feature_register(struct tegra_dc *dc)
 		dc->feature = &t30_feature_table_a;
 	else
 		dc->feature = &t30_feature_table_b;
-#elif defined(CONFIG_ARCH_TEGRA_11x_SOC)
-	if (!dc->ndev->id)
-		dc->feature = &t114_feature_table_a;
-	else
-		dc->feature = &t114_feature_table_b;
 #endif
-	/* Count the number of windows using gen1 blender. */
-	dc->gen1_blend_num = 0;
-	for (i = 0; i < dc->feature->num_entries; i++) {
-		entry = &dc->feature->entries[i];
-		if (entry->option == TEGRA_DC_FEATURE_BLEND_TYPE &&
-					entry->arg[BLEND_GENERATION] == 1)
-			dc->gen1_blend_num++;
-	}
 }

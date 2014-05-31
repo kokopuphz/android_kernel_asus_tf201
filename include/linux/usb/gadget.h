@@ -476,6 +476,7 @@ struct usb_gadget_ops {
 	int	(*start)(struct usb_gadget_driver *,
 			int (*bind)(struct usb_gadget *));
 	int	(*stop)(struct usb_gadget_driver *);
+	int	(*req_reset) (struct usb_gadget *);
 };
 
 /**
@@ -764,6 +765,13 @@ static inline int usb_gadget_disconnect(struct usb_gadget *gadget)
 	return gadget->ops->pullup(gadget, 0);
 }
 
+static inline int usb_gadget_request_reset(struct usb_gadget *gadget)
+{
+	if (!gadget->ops->req_reset)
+		return -EOPNOTSUPP;
+	return gadget->ops->req_reset(gadget);
+}
+
 
 /*-------------------------------------------------------------------------*/
 
@@ -839,6 +847,9 @@ struct usb_gadget_driver {
 	int			(*setup)(struct usb_gadget *,
 					const struct usb_ctrlrequest *);
 	void			(*disconnect)(struct usb_gadget *);
+#ifdef CONFIG_MACH_ENDEAVORU
+	void			(*mute_disconnect)(struct usb_gadget *);
+#endif
 	void			(*suspend)(struct usb_gadget *);
 	void			(*resume)(struct usb_gadget *);
 

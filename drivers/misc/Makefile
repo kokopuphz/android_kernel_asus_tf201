@@ -68,5 +68,25 @@ obj-$(CONFIG_SND_SOC_TEGRA_CS42L73)	+= a2220.o
 obj-$(CONFIG_SND_SOC_TEGRA_RT5640)	+= tfa9887.o
 obj-$(CONFIG_FAN_THERM_EST)	+= therm_fan_est.o
 obj-$(CONFIG_BLUEDROID_PM)      += bluedroid_pm.o
-obj-y				+= issp/
-obj-$(CONFIG_TEGRA_PROFILER)    += tegra-profiler/
+
+
+# EternityProject Boards Drivers [START]
+  # HTC ENRU [START]
+obj-$(CONFIG_MACH_ENDEAVORU)	+= tegra_vibrator_enr.o
+obj-$(CONFIG_CABLE_DETECT_ACCESSORY)+= cable_detect.o
+obj-$(CONFIG_MOT_FEAT_TS27010MUX_UART)	+= ts27010mux_uart/
+  # HTC ENRU [END]
+
+  # LGE X3 [START]
+obj-$(CONFIG_ADC_TSC2007)	+= tsc2007_adc.o
+obj-$(CONFIG_BCM4330_RFKILL)	+= lbee9qmb-rfkill.o
+obj-$(CONFIG_MACH_X3)		+= bthid/
+obj-$(CONFIG_MACH_X3)		+= muic/
+obj-$(CONFIG_TSPDRV)		+= tspdrv/
+obj-$(CONFIG_MACH_X3)		+= ts0710mux/
+obj-$(CONFIG_MACH_X3)		+= mtc_eta/
+obj-$(CONFIG_MACH_X3)		+= inv_mpu/
+obj-$(CONFIG_X3_CPWATCHER)	+= cpwatcher.o
+obj-$(CONFIG_LGE_ERS)		+= lge_ers.o
+  # LGE X3 [END]
+# EternityProject Boards Drivers [END]

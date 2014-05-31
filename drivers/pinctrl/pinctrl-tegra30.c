@@ -3247,6 +3247,9 @@ static const char * const vi_alt1_groups[] = {
 
 static const char * const vi_alt2_groups[] = {
 	"vi_mclk_pt1",
+#ifdef CONFIG_MACH_ENDEAVORU
+	"cam_mclk_pcc0",
+#endif
 };
 
 static const char * const vi_alt3_groups[] = {
@@ -3449,7 +3452,11 @@ static const struct tegra_pingroup tegra30_groups[] = {
 	PINGROUP(gmi_wp_n_pc7,         RSVD1,        NAND,         GMI,          GMI_ALT,      RSVD1,        0x31c0, N, N),
 	PINGROUP(sdmmc3_dat5_pd0,      PWM0,         SPI4,         SDMMC3,       SPI2,         SPI2,         0x33ac, N, N),
 	PINGROUP(sdmmc3_dat4_pd1,      PWM1,         SPI4,         SDMMC3,       SPI2,         SPI2,         0x33a8, N, N),
+#ifdef CONFIG_MACH_ENDEAVORU
+	PINGROUP(lcd_dc1_pd2,          DISPLAYA,     DISPLAYB,     RSVD1,        RSVD2,        DISPLAYA,     0x310c, N, N),
+#else
 	PINGROUP(lcd_dc1_pd2,          DISPLAYA,     DISPLAYB,     RSVD3,        RSVD4,        RSVD4,        0x310c, N, N),
+#endif
 	PINGROUP(sdmmc3_dat6_pd3,      SPDIF,        SPI4,         SDMMC3,       SPI2,         SPI2,         0x33b0, N, N),
 	PINGROUP(sdmmc3_dat7_pd4,      SPDIF,        SPI4,         SDMMC3,       SPI2,         SPI2,         0x33b4, N, N),
 	PINGROUP(vi_d1_pd5,            DDR,          SDMMC2,       VI,           RSVD4,        RSVD4,        0x3128, N, Y),
@@ -3647,7 +3654,11 @@ static const struct tegra_pingroup tegra30_groups[] = {
 	PINGROUP(pbb5,                 VGP5,         DISPLAYA,     DISPLAYB,     SDMMC4,       SDMMC4,       0x32a0, N, N),
 	PINGROUP(pbb6,                 VGP6,         DISPLAYA,     DISPLAYB,     SDMMC4,       SDMMC4,       0x32a4, N, N),
 	PINGROUP(pbb7,                 I2S4,         RSVD2,        RSVD3,        SDMMC4,       RSVD3,        0x32a8, N, N),
+#ifdef CONFIG_MACH_ENDEAVORU
+	PINGROUP(cam_mclk_pcc0,        VI,           VI_ALT1,      VI_ALT2,      SDMMC4,       RSVD1,        0x3284, N, N),
+#else
 	PINGROUP(cam_mclk_pcc0,        VI,           VI_ALT1,      VI_ALT3,      SDMMC4,       SDMMC4,       0x3284, N, N),
+#endif
 	PINGROUP(pcc1,                 I2S4,         RSVD2,        RSVD3,        SDMMC4,       RSVD3,        0x3288, N, N),
 	PINGROUP(pcc2,                 I2S4,         RSVD2,        RSVD3,        RSVD4,        RSVD4,        0x32ac, N, N),
 	PINGROUP(sdmmc4_rst_n_pcc3,    VGP6,         RSVD2,        RSVD3,        SDMMC4,       RSVD3,        0x3280, N, Y),
@@ -3726,12 +3737,13 @@ static const struct tegra_pinctrl_soc_data tegra30_pinctrl = {
 	.ngroups = ARRAY_SIZE(tegra30_groups),
 };
 
-static int __devinit tegra30_pinctrl_probe(struct platform_device *pdev)
+static int tegra30_pinctrl_probe(struct platform_device *pdev)
 {
+	pr_info("tegra30_pinctrl_probe\n");
 	return tegra_pinctrl_probe(pdev, &tegra30_pinctrl);
 }
 
-static struct of_device_id tegra30_pinctrl_of_match[] __devinitdata = {
+static struct of_device_id tegra30_pinctrl_of_match[] = {
 	{ .compatible = "nvidia,tegra30-pinmux", },
 	{ },
 };
@@ -3743,11 +3755,12 @@ static struct platform_driver tegra30_pinctrl_driver = {
 		.of_match_table = tegra30_pinctrl_of_match,
 	},
 	.probe = tegra30_pinctrl_probe,
-	.remove = __devexit_p(tegra_pinctrl_remove),
+	.remove = tegra_pinctrl_remove,
 };
 
 static int __init tegra30_pinctrl_init(void)
 {
+	pr_info("tegra30_pinctrl_init\n");
 	return platform_driver_register(&tegra30_pinctrl_driver);
 }
 arch_initcall(tegra30_pinctrl_init);

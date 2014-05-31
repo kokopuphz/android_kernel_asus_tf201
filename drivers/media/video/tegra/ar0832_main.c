@@ -9,29 +9,24 @@
 */
 
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/miscdevice.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
+#include <mach/hardware.h>
 #include <linux/gpio.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
-#include <linux/atomic.h>
+#include <asm/atomic.h>
 #include <linux/regulator/consumer.h>
-#include <linux/export.h>
-#include <linux/module.h>
-
 #include <media/ar0832_main.h>
 
-
-#define POS_ACTUAL_LOW			0
-#define POS_ACTUAL_HIGH			255
-#define SETTLE_TIME				100
-#define AR0832_SLEW_RATE_DISABLED  0
-#define AR0832_SLEW_RATE_SLOWEST   7
-
+#define POS_LOW  0
+#define POS_HIGH 1000
+#define SETTLETIME_MS 100
 
 struct ar0832_sensor_info {
 	int mode;
@@ -39,7 +34,7 @@ struct ar0832_sensor_info {
 };
 
 struct ar0832_focuser_info {
-	struct nv_focuser_config config;
+	struct ar0832_focuser_config config;
 	int focuser_init_flag;
 	u16 last_position;
 };
@@ -148,7 +143,7 @@ static struct ar0832_reg mode_3264X2448_8140[] = {
 	{0x3E12, 0x4B24},
 	{0x3E14, 0xA3CF},
 	{0x3E16, 0x8802},
-	{0x3E18, 0x84FF},
+	{0x3E18, 0x8401},
 	{0x3E1A, 0x8601},
 	{0x3E1C, 0x8401},
 	{0x3E1E, 0x840A},
@@ -196,6 +191,7 @@ static struct ar0832_reg mode_3264X2448_8140[] = {
 	{0x3ED4, 0xAFC4},
 	{0x3ED6, 0x909B},
 	{0x3EE0, 0x2424},
+	{0x3EE2, 0x9797},
 	{0x3EE4, 0xC100},
 	{0x3EE6, 0x0540},
 	{0x3174, 0x8000},
@@ -251,8 +247,8 @@ static struct ar0832_reg mode_3264X2448_8141[] = {
 	{0x306E, 0xFC80},
 	{0x30B2, 0xC000},
 	{0x30D6, 0x0800},
-	{0x316C, 0xB42A},
-	{0x316E, 0x869C},
+	{0x316C, 0xB42F},
+	{0x316E, 0x869A},
 	{0x3170, 0x210E},
 	{0x317A, 0x010E},
 	{0x31E0, 0x1FB9},
@@ -283,7 +279,7 @@ static struct ar0832_reg mode_3264X2448_8141[] = {
 	{0x3E26, 0x0088},
 	{0x3E28, 0x2E8A},
 	{0x3E30, 0x0000},
-	{0x3E32, 0x00FF},
+	{0x3E32, 0x8801},
 	{0x3E34, 0x4029},
 	{0x3E36, 0x00FF},
 	{0x3E38, 0x8469},
@@ -313,14 +309,15 @@ static struct ar0832_reg mode_3264X2448_8141[] = {
 	{0x3E98, 0x2B02},
 	{0x3E92, 0x2A04},
 	{0x3E94, 0x2509},
-	{0x3E96, 0xF000},
+	{0x3E96, 0x0000},
 	{0x3E9A, 0x2905},
 	{0x3E9C, 0x00FF},
 	{0x3ECC, 0x00EB},
 	{0x3ED0, 0x1E24},
-	{0x3ED4, 0xFAA4},
+	{0x3ED4, 0xAFC4},
 	{0x3ED6, 0x909B},
 	{0x3EE0, 0x2424},
+	{0x3EE2, 0x9797},
 	{0x3EE4, 0xC100},
 	{0x3EE6, 0x0540},
 	{0x3174, 0x8000},
@@ -1884,26 +1881,24 @@ static int ar0832_power_on(struct ar0832_dev *dev)
 				goto fail_regulator_2v8_reg;
 			}
 		}
-		dev->pdata->power_on(&i2c_client->dev, dev->is_stereo);
+		dev->pdata->power_on(dev->is_stereo);
 	}
 	dev->brd_power_cnt++;
+	mutex_unlock(&dev->ar0832_camera_lock);
 
 	/* Change slave address */
 	if (i2c_client->addr)
 		ret = ar0832_set_alternate_addr(i2c_client);
 
-	mutex_unlock(&dev->ar0832_camera_lock);
 	return 0;
 
 fail_regulator_2v8_reg:
 	regulator_put(dev->power_rail.sen_2v8_reg);
 	dev->power_rail.sen_2v8_reg = NULL;
-	if (dev->power_rail.sen_1v8_reg)
-		regulator_disable(dev->power_rail.sen_1v8_reg);
+	regulator_disable(dev->power_rail.sen_1v8_reg);
 fail_regulator_1v8_reg:
 	regulator_put(dev->power_rail.sen_1v8_reg);
 	dev->power_rail.sen_1v8_reg = NULL;
-	mutex_unlock(&dev->ar0832_camera_lock);
 	return ret;
 }
 
@@ -1924,7 +1919,7 @@ static void ar0832_power_off(struct ar0832_dev *dev)
 			regulator_disable(dev->power_rail.sen_2v8_reg);
 		if (dev->power_rail.sen_1v8_reg)
 			regulator_disable(dev->power_rail.sen_1v8_reg);
-		dev->pdata->power_off(&i2c_client->dev, dev->is_stereo);
+		dev->pdata->power_off(dev->is_stereo);
 	}
 
 ar0832_pwdn_exit:
@@ -1936,26 +1931,13 @@ static int ar0832_focuser_set_config(struct ar0832_dev *dev)
 	struct i2c_client *i2c_client = dev->i2c_client;
 	struct ar0832_reg reg_vcm_ctrl, reg_vcm_step_time;
 	int ret = 0;
-	u8 vcm_slew;
-	u16 vcm_control_data;
-	u16 vcm_step_time = 1024;
-
-	/* slew_rate of disabled (0) or default value (1) will disable    */
-	/* the slew rate in this case. Any value of 2 onwards will enable */
-	/* the slew rate to a different degree */
-	if (dev->focuser_info->config.slew_rate == SLEW_RATE_DISABLED ||
-	   dev->focuser_info->config.slew_rate == SLEW_RATE_DEFAULT)
-		vcm_slew = AR0832_SLEW_RATE_DISABLED;
-	else
-		vcm_slew = dev->focuser_info->config.slew_rate - 1;
-
-	if (vcm_slew > AR0832_SLEW_RATE_SLOWEST)
-		vcm_slew = AR0832_SLEW_RATE_SLOWEST;
+	u8 vcm_slew = 1;
 
 	/* bit15(0x80) means that VCM driver enable bit. */
 	/* bit3(0x08) means that keep VCM(AF position) */
 	/* while sensor is in soft standby mode during mode transitions. */
-	vcm_control_data = (0x80 << 8 | (0x08 | (vcm_slew & 0x07)));
+	u16 vcm_control_data = (0x80 << 8 | (0x08 | (vcm_slew & 0x07)));
+	u16 vcm_step_time = 1024;
 
 	ar0832_get_focuser_vcm_control_regs(&reg_vcm_ctrl, vcm_control_data);
 	ret = ar0832_write_reg16(dev->i2c_client, reg_vcm_ctrl.addr,
@@ -1996,64 +1978,6 @@ static int ar0832_focuser_set_position(struct ar0832_dev *dev,
 	return ret;
 }
 
-#ifdef AR0832_FOCUSER_DYNAMIC_STEP_TIME
-/*
- * This function is not currently called as we have the hardcoded
- * step time in ar0832_focuser_set_config function. If we need to
- * compute the actual step time based on a number of clocks, we need
- * to use this function. The formula for computing the clock-based
- * step time is obtained from Aptina and is not part of external
- * documentation and hence this code needs to be saved.
- */
-static u16 ar0832_get_focuser_vcm_step_time(struct ar0832_dev *dev)
-{
-	struct i2c_client *i2c_client = dev->i2c_client;
-	int ret;
-	u16 pll_multiplier = 0;
-	u16 pre_pll_clk_div = 0;
-	u16 vt_sys_clk_div = 0;
-	u16 vt_pix_clk_div = 0;
-	u16 vt_pix_clk_freq_mhz = 0;
-
-	ret = ar0832_read_reg16(dev->i2c_client, 0x306, &pll_multiplier);
-	if (ret) {
-		dev_err(&i2c_client->dev, "%s pll_multiplier read failed\n",
-				__func__);
-	}
-
-	ret = ar0832_read_reg16(dev->i2c_client, 0x304, &pre_pll_clk_div);
-	if (ret) {
-		dev_err(&i2c_client->dev, "%s pre_pll_clk_div read failed\n",
-				__func__);
-	}
-
-	ret = ar0832_read_reg16(dev->i2c_client, 0x302, &vt_sys_clk_div);
-	if (ret) {
-		dev_err(&i2c_client->dev, "%s vt_sys_clk_div read failed\n",
-				__func__);
-	}
-
-	ret = ar0832_read_reg16(dev->i2c_client, 0x300, &vt_pix_clk_div);
-	if (ret) {
-		dev_err(&i2c_client->dev, "%s vt_pix_clk_div read failed\n",
-				__func__);
-	}
-
-	vt_pix_clk_freq_mhz =
-		(24 * pll_multiplier) / (pre_pll_clk_div * vt_sys_clk_div *
-		 vt_pix_clk_div);
-
-	dev_dbg(&i2c_client->dev, "%s pll_multiplier 0x%X pre_pll_clk_div 0x%X "
-			"vt_sys_clk_div 0x%X vt_pix_clk_div 0x%X vt_pix_clk_freq_mhz 0x%X\n",
-			__func__, pll_multiplier,
-			pre_pll_clk_div, vt_sys_clk_div,
-			vt_pix_clk_div, vt_pix_clk_freq_mhz);
-
-	return vt_pix_clk_freq_mhz;
-
-}
-#endif
-
 static inline
 int ar0832_get_sensorid(struct ar0832_dev *dev, u16 *sensor_id)
 {
@@ -2073,51 +1997,8 @@ int ar0832_get_sensorid(struct ar0832_dev *dev, u16 *sensor_id)
 	return ret;
 }
 
-static long ar0832_set_focuser_capabilities(struct ar0832_dev *dev,
-						unsigned long arg)
-{
-	struct i2c_client *i2c_client = dev->i2c_client;
-	struct nv_focuser_config config;
-
-	/* backup the current contents of dev->focuser_info->config for
-	 * selective restore later on */
-	memcpy(&config, &dev->focuser_info->config,
-		sizeof(struct nv_focuser_config));
-
-	if (copy_from_user(&dev->focuser_info->config,
-		(const void __user *)arg,
-		sizeof(struct nv_focuser_config))) {
-		dev_err(&i2c_client->dev,
-			"%s: copy_from_user() failed\n", __func__);
-		return -EFAULT;
-	}
-
-	/* Now do selectively restore members that are overwriten */
-
-	/* Unconditionally restore actual low and high positions */
-	dev->focuser_info->config.pos_actual_low = config.pos_actual_low;
-	dev->focuser_info->config.pos_actual_high = config.pos_actual_high;
-
-	if (dev->focuser_info->config.pos_working_low == AF_POS_INVALID_VALUE)
-		dev->focuser_info->config.pos_working_low =
-						config.pos_working_low;
-
-	if (dev->focuser_info->config.pos_working_high == AF_POS_INVALID_VALUE)
-		dev->focuser_info->config.pos_working_high =
-						config.pos_working_high;
-
-	if (dev->focuser_info->config.focuser_set[0].settle_time == INT_MAX)
-		dev->focuser_info->config.focuser_set[0].settle_time =
-					config.focuser_set[0].settle_time;
-
-	if (dev->focuser_info->config.slew_rate == INT_MAX)
-		dev->focuser_info->config.slew_rate = config.slew_rate;
-
-	return 0;
-}
-
 static long ar0832_ioctl(struct file *file,
-	unsigned int cmd, unsigned long arg)
+				unsigned int cmd, unsigned long arg)
 {
 	int err;
 	struct ar0832_dev *dev = file->private_data;
@@ -2213,7 +2094,6 @@ static long ar0832_ioctl(struct file *file,
 	{
 		dev_dbg(&i2c_client->dev, "AR0832_IOCTL_SET_SENSOR_REGION\n");
 		/* Right now, it doesn't do anything */
-
 		return 0;
 	}
 
@@ -2222,29 +2102,12 @@ static long ar0832_ioctl(struct file *file,
 			"%s AR0832_FOCUSER_IOCTL_GET_CONFIG\n", __func__);
 		if (copy_to_user((void __user *) arg,
 				 &dev->focuser_info->config,
-				 sizeof(struct nv_focuser_config)))
-        {
+				 sizeof(dev->focuser_info->config))) {
 			dev_err(&i2c_client->dev,
 				"%s: AR0832_FOCUSER_IOCTL_GET_CONFIG failed\n",
 				__func__);
 			return -EFAULT;
 		}
-		return 0;
-
-	case AR0832_FOCUSER_IOCTL_SET_CONFIG:
-		dev_info(&i2c_client->dev,
-				"%s AR0832_FOCUSER_IOCTL_SET_CONFIG\n", __func__);
-		if (ar0832_set_focuser_capabilities(dev, arg) != 0) {
-			dev_err(&i2c_client->dev,
-			"%s: AR0832_IOCTL_SET_CONFIG failed\n", __func__);
-			return -EFAULT;
-		}
-		dev_dbg(&i2c_client->dev,
-			"%s AR0832_FOCUSER_IOCTL_SET_CONFIG sucess "
-			"slew_rate %i, pos_working_high %i, pos_working_low %i\n",
-			__func__, dev->focuser_info->config.slew_rate,
-			dev->focuser_info->config.pos_working_low,
-			dev->focuser_info->config.pos_working_high);
 		return 0;
 
 	case AR0832_FOCUSER_IOCTL_SET_POSITION:
@@ -2481,7 +2344,7 @@ static void ar0832_create_debugfs(struct ar0832_dev *dev)
 		goto remove_debugfs;
 
 	ret = debugfs_create_file("test_pattern",
-				S_IWUSR | S_IRUGO,
+				S_IWUGO | S_IRUGO,
 				dev->debugdir, dev,
 				&ar0832_debugfs_fops);
 	if (!ret)
@@ -2522,12 +2385,9 @@ static int ar0832_probe(struct i2c_client *client,
 	dev->i2c_client = client;
 
 	/* focuser */
-	dev->focuser_info->config.focuser_set[0].settle_time = SETTLE_TIME;
-	dev->focuser_info->config.slew_rate = SLEW_RATE_DEFAULT;
-	dev->focuser_info->config.pos_actual_low = POS_ACTUAL_LOW;
-	dev->focuser_info->config.pos_actual_high = POS_ACTUAL_HIGH;
-	dev->focuser_info->config.pos_working_low = POS_ACTUAL_LOW;
-	dev->focuser_info->config.pos_working_high = POS_ACTUAL_HIGH;
+	dev->focuser_info->config.settle_time = SETTLETIME_MS;
+	dev->focuser_info->config.pos_low = POS_LOW;
+	dev->focuser_info->config.pos_high = POS_HIGH;
 
 	snprintf(dev->dname, sizeof(dev->dname), "%s-%s",
 		id->name, dev->pdata->id);
@@ -2590,8 +2450,10 @@ static int ar0832_remove(struct i2c_client *client)
 		regulator_put(dev->power_rail.sen_2v8_reg);
 
 	misc_deregister(&dev->misc_dev);
-	kfree(dev->sensor_info);
-	kfree(dev->focuser_info);
+	if (dev) {
+		kfree(dev->sensor_info);
+		kfree(dev->focuser_info);
+	}
 
 	ar0832_remove_debugfs(dev);
 

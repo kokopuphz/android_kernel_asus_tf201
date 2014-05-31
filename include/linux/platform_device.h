@@ -173,6 +173,7 @@ struct platform_driver {
 
 extern int platform_driver_register(struct platform_driver *);
 extern void platform_driver_unregister(struct platform_driver *);
+extern int platform_driver_compat(struct platform_driver *, const char *);
 
 /* non-hotpluggable platform devices may use this so that probe() and
  * its support may live in __init sections, conserving runtime memory.

@@ -598,6 +598,12 @@ config BLUEDROID_PM
           Say Y here to compile support for bluedroid_pm support into the kernel
           or say M to compile it as module (bluedroid_pm).
 
+config CABLE_DETECT_ACCESSORY
+	bool "USB accessory detection"
+	default n
+	---help---
+	  USB accessory detection by HTC for ENRU phone
+
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
@@ -605,10 +611,10 @@ source "drivers/misc/cb710/Kconfig"
 source "drivers/misc/iwmc3200top/Kconfig"
 source "drivers/misc/ti-st/Kconfig"
 source "drivers/misc/lis3lv02d/Kconfig"
+source "drivers/misc/ts0710mux/Kconfig"
 source "drivers/misc/carma/Kconfig"
 source "drivers/misc/altera-stapl/Kconfig"
 source "drivers/misc/tegra-baseband/Kconfig"
 source "drivers/misc/tegra-cec/Kconfig"
-source "drivers/misc/issp/Kconfig"
-source "drivers/misc/tegra-profiler/Kconfig"
+source "drivers/misc/ts27010mux_uart/Kconfig"
 endmenu

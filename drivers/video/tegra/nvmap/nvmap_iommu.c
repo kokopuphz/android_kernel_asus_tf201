@@ -80,6 +80,7 @@ static int tegra_iommu_create_map(struct device *dev)
 
 	map = arm_iommu_create_mapping(&platform_bus_type,
 				       TEGRA_IOMMU_BASE, TEGRA_IOMMU_SIZE, 0);
+
 	if (IS_ERR(map))
 		return PTR_ERR(map);
 
@@ -95,7 +96,6 @@ static void tegra_iommu_delete_map(struct device *dev)
 {
 	arm_iommu_release_mapping(dev->archdata.mapping);
 }
-
 #endif
 
 struct tegra_iovmm_client *tegra_iommu_alloc_client(struct device *dev)

@@ -38,15 +38,16 @@
 #define USB_MAX_CTRL_PAYLOAD		64
 
  /* Charger current limit=1800mA, as per the USB charger spec */
-#define USB_CHARGING_DCP_CURRENT_LIMIT_UA 2000000u
-#define USB_CHARGING_CDP_CURRENT_LIMIT_UA 1500000u
-#define USB_CHARGING_SDP_CURRENT_LIMIT_UA 500000u
-#define USB_CHARGING_NV_CHARGER_CURRENT_LIMIT_UA 2000000u
-#define USB_CHARGING_NON_STANDARD_CHARGER_CURRENT_LIMIT_UA 500000u
+#define USB_CHARGING_CURRENT_LIMIT_MA	  1800
+#define USB_CHARGING_DCP_CURRENT_LIMIT_UA 1800000
+#define USB_CHARGING_CDP_CURRENT_LIMIT_UA 1500000
+#define USB_CHARGING_SDP_CURRENT_LIMIT_UA 100000
+#define USB_CHARGING_NV_CHARGER_CURRENT_LIMIT_UA 2000000
+#define USB_CHARGING_NON_STANDARD_CHARGER_CURRENT_LIMIT_UA 500000
 
- /* 1 sec wait time for non-std charger detection after vbus is detected */
-#define NON_STD_CHARGER_DET_TIME_MS 1000
-#define BOOST_TRIGGER_SIZE 20
+ /* 4 sec wait time for charger detection after vbus is detected */
+#define USB_CHARGER_DETECTION_WAIT_TIME_MS 4000
+#define BOOST_TRIGGER_SIZE 4096
 
 #define UDC_RESET_TIMEOUT_MS 1000
 #define UDC_RUN_TIMEOUT_MS 1000
@@ -405,14 +406,12 @@ struct tegra_ep {
 	unsigned stopped:1;
 };
 
-enum tegra_connect_type {
-	CONNECT_TYPE_NONE,
-	CONNECT_TYPE_SDP,
-	CONNECT_TYPE_DCP,
-	CONNECT_TYPE_CDP,
-	CONNECT_TYPE_NV_CHARGER,
-	CONNECT_TYPE_NON_STANDARD_CHARGER
-};
+/* Definition of enum tegra_connect_type */
+#include <linux/usb/eprj_tegra.h>
+
+#ifdef CONFIG_MACH_ENDEAVORU
+#include <../arch/arm/mach-tegra/eprj_enru/include/mach/cable_detect.h>
+#endif
 
 struct tegra_udc {
 	struct usb_gadget gadget;
@@ -455,7 +454,19 @@ struct tegra_udc {
 	unsigned remote_wakeup:1;
 	unsigned selfpowered:1;
 	bool has_hostpc;
-	bool fence_read;
+
+#ifdef CONFIG_MACH_ENDEAVORU
+//	enum usb_connect_type connect_type;
+	struct workqueue_struct *usb_wq;
+	struct work_struct detect_work;
+	struct delayed_work chg_work;
+	struct work_struct notifier_work;
+
+	struct delayed_work ac_detect_work;
+	int			ac_detect_count;
+
+	struct delayed_work check_vbus_work;
+#endif
 };
 
 

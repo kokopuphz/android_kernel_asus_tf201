@@ -1,0 +1,6 @@
+config TOUCHSCREEN_SYNAPTICS_3k
+	tristate "SYNAPTICS_3k Touchscreen Interface"
+	depends on I2C
+	help
+	  To compile this driver as a module, choose M here: the
+	  module will be called synaptics_3k.

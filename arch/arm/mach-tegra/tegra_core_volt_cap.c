@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/tegra_core_volt_cap.c
  *
- * Copyright (c), NVIDIA CORPORATION. All rights reserved.
+ * Copyright (C) 2013 NVIDIA Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -23,7 +23,6 @@
 
 #include "clock.h"
 #include "dvfs.h"
-#include "tegra_core_sysfs_limits.h"
 
 /*
  * sysfs and kernel interfaces to limit tegra core shared bus frequencies based
@@ -52,19 +51,14 @@ static int core_cap_table_size;
 static const int *cap_millivolts;
 static int cap_millivolts_num;
 
-static int core_cap_level_set(int level, int core_nominal_mv)
+static int core_nominal_mv;
+
+static void core_cap_level_set(int level)
 {
 	int i, j;
-	int ret = 0;
 
-	if (!core_cap_table) {
-		int mv = tegra_dvfs_rail_get_boot_level(tegra_core_rail);
-		if (level == mv) {
-			core_buses_cap.level = level;
-			return 0;
-		}
-		return -ENOENT;
-	}
+	if (!core_cap_table)
+		return;
 
 	for (j = 0; j < cap_millivolts_num; j++) {
 		int v = cap_millivolts[j];
@@ -77,47 +71,38 @@ static int core_cap_level_set(int level, int core_nominal_mv)
 	if (level < core_buses_cap.level) {
 		for (i = 0; i < core_cap_table_size; i++)
 			if (core_cap_table[i].cap_clk)
-				ret |= clk_set_rate(core_cap_table[i].cap_clk,
+				clk_set_rate(core_cap_table[i].cap_clk,
 					     core_cap_table[i].freqs[j]);
 	} else if (level > core_buses_cap.level) {
 		for (i = core_cap_table_size - 1; i >= 0; i--)
 			if (core_cap_table[i].cap_clk)
-				ret |= clk_set_rate(core_cap_table[i].cap_clk,
+				clk_set_rate(core_cap_table[i].cap_clk,
 					     core_cap_table[i].freqs[j]);
 	}
 	core_buses_cap.level = level;
-	if (ret)
-		ret = -EAGAIN;
-	return ret;
 }
 
-static int core_cap_update(void)
+static void core_cap_update(void)
 {
-	int new_level;
-	int core_nominal_mv =
-		tegra_dvfs_rail_get_nominal_millivolts(tegra_core_rail);
-	if (core_nominal_mv <= 0)
-		return -ENOENT;
+	int new_level = core_nominal_mv;
 
-	new_level = core_nominal_mv;
 	if (kdvfs_core_cap.refcnt)
 		new_level = min(new_level, kdvfs_core_cap.level);
 	if (user_core_cap.refcnt)
 		new_level = min(new_level, user_core_cap.level);
 
 	if (core_buses_cap.level != new_level)
-		return core_cap_level_set(new_level, core_nominal_mv);
-	return 0;
+		core_cap_level_set(new_level);
 }
 
-static int core_cap_enable(bool enable)
+static void core_cap_enable(bool enable)
 {
 	if (enable)
 		core_buses_cap.refcnt++;
 	else if (core_buses_cap.refcnt)
 		core_buses_cap.refcnt--;
 
-	return core_cap_update();
+	core_cap_update();
 }
 
 static ssize_t
@@ -186,32 +171,28 @@ const struct attribute *cap_attributes[] = {
 	NULL,
 };
 
-int tegra_dvfs_core_cap_level_apply(int level)
+void tegra_dvfs_core_cap_enable(bool enable)
 {
-	int ret = 0;
-
 	mutex_lock(&core_cap_lock);
 
-	if (level) {
-		if (kdvfs_core_cap.refcnt) {
-			pr_err("%s: core cap is already set\n", __func__);
-			ret = -EPERM;
-		} else {
-			kdvfs_core_cap.level = level;
-			kdvfs_core_cap.refcnt = 1;
-			ret = core_cap_enable(true);
-			if (ret) {
-				kdvfs_core_cap.refcnt = 0;
-				core_cap_enable(false);
-			}
-		}
+	if (enable) {
+		kdvfs_core_cap.refcnt++;
+		if (kdvfs_core_cap.refcnt == 1)
+			core_cap_enable(true);
 	} else if (kdvfs_core_cap.refcnt) {
-		kdvfs_core_cap.refcnt = 0;
-		core_cap_enable(false);
+		kdvfs_core_cap.refcnt--;
+		if (kdvfs_core_cap.refcnt == 0)
+			core_cap_enable(false);
 	}
-
 	mutex_unlock(&core_cap_lock);
-	return ret;
+}
+
+void tegra_dvfs_core_cap_level_set(int level)
+{
+	mutex_lock(&core_cap_lock);
+	kdvfs_core_cap.level = level;
+	core_cap_update();
+	mutex_unlock(&core_cap_lock);
 }
 
 static int __init init_core_cap_one(struct clk *c, unsigned long *freqs)
@@ -268,13 +249,15 @@ int __init tegra_init_core_cap(
 	if (!table || !table_size || !millivolts || !millivolts_num)
 		return -EINVAL;
 
-	user_core_cap.level =
+	core_nominal_mv =
 		tegra_dvfs_rail_get_nominal_millivolts(tegra_core_rail);
-	if (user_core_cap.level <= 0)
-		return -ENOENT;
+	if (core_nominal_mv <= 0)
+		return -ENODATA;
 
 	cap_millivolts = millivolts;
 	cap_millivolts_num = millivolts_num;
+	core_buses_cap.level = kdvfs_core_cap.level = user_core_cap.level =
+		core_nominal_mv;
 
 	for (i = 0; i < table_size; i++) {
 		c = tegra_get_clock_by_name(table[i].cap_name);
@@ -412,102 +395,6 @@ int __init tegra_init_shared_bus_cap(
 	bus_cap_attributes[j] = NULL;
 
 	if (!cap_kobj || sysfs_create_files(cap_kobj, bus_cap_attributes))
-		return -ENOMEM;
-	return 0;
-}
-
-static DEFINE_MUTEX(bus_floor_lock);
-const struct attribute *bus_floor_attributes[2 * MAX_BUS_NUM + 1];
-
-#define refcnt_to_bus_floor(attr) \
-	container_of(attr, struct core_bus_floor_table, refcnt_attr)
-#define level_to_bus_floor(attr) \
-	container_of(attr, struct core_bus_floor_table, level_attr)
-
-static ssize_t
-bus_floor_state_show(struct kobject *kobj, struct kobj_attribute *attr,
-		    char *buf)
-{
-	struct core_bus_floor_table *bus_floor = refcnt_to_bus_floor(attr);
-	struct clk *c = bus_floor->floor_clk;
-	return sprintf(buf, "%d\n", tegra_is_clk_enabled(c) ? 1 : 0);
-}
-static ssize_t
-bus_floor_state_store(struct kobject *kobj, struct kobj_attribute *attr,
-		     const char *buf, size_t count)
-{
-	int state;
-	struct core_bus_floor_table *bus_floor = refcnt_to_bus_floor(attr);
-	struct clk *c = bus_floor->floor_clk;
-
-	if (sscanf(buf, "%d", &state) != 1)
-		return -EINVAL;
-
-	if (state) {
-		int ret = tegra_clk_prepare_enable(c);
-		if (ret)
-			return ret;
-	} else {
-		tegra_clk_disable_unprepare(c);
-	}
-	return count;
-}
-
-static ssize_t
-bus_floor_level_show(struct kobject *kobj, struct kobj_attribute *attr,
-		    char *buf)
-{
-	struct core_bus_floor_table *bus_floor = level_to_bus_floor(attr);
-	return sprintf(buf, "%d\n", bus_floor->level);
-}
-static ssize_t
-bus_floor_level_store(struct kobject *kobj, struct kobj_attribute *attr,
-		     const char *buf, size_t count)
-{
-	int level, ret;
-	struct core_bus_floor_table *bus_floor = level_to_bus_floor(attr);
-	struct clk *c = bus_floor->floor_clk;
-
-	if (sscanf(buf, "%d", &level) != 1)
-		return -EINVAL;
-
-	mutex_lock(&bus_floor_lock);
-	ret = clk_set_rate(c, level);
-	if (!ret)
-		bus_floor->level = level;
-	mutex_unlock(&bus_floor_lock);
-	return ret ? : count;
-}
-
-int __init tegra_init_shared_bus_floor(
-	struct core_bus_floor_table *table, int table_size,
-	struct kobject *floor_kobj)
-{
-	int i, j;
-	struct clk *c = NULL;
-
-	if (!table || !table_size || (table_size > MAX_BUS_NUM))
-		return -EINVAL;
-
-	for (i = 0, j = 0; i < table_size; i++) {
-		c = tegra_get_clock_by_name(table[i].floor_name);
-		if (!c) {
-			pr_err("%s: failed to initialize %s table\n",
-			       __func__, table[i].floor_name);
-			continue;
-		}
-		table[i].floor_clk = c;
-		table[i].level = clk_get_max_rate(c);
-		table[i].refcnt_attr.show = bus_floor_state_show;
-		table[i].refcnt_attr.store = bus_floor_state_store;
-		table[i].level_attr.show = bus_floor_level_show;
-		table[i].level_attr.store = bus_floor_level_store;
-		bus_floor_attributes[j++] = &table[i].refcnt_attr.attr;
-		bus_floor_attributes[j++] = &table[i].level_attr.attr;
-	}
-	bus_floor_attributes[j] = NULL;
-
-	if (!floor_kobj || sysfs_create_files(floor_kobj, bus_floor_attributes))
 		return -ENOMEM;
 	return 0;
 }

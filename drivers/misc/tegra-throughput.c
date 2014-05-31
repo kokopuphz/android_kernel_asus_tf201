@@ -45,14 +45,14 @@ static void set_throughput_hint(struct work_struct *work)
 	nvhost_scale3d_set_throughput_hint(throughput_hint);
 }
 
-static int throughput_flip_callback(void)
+static void throughput_flip_callback(void)
 {
 	long timediff;
 	ktime_t now;
 
 	/* only register flips when a single app is active */
 	if (multiple_app_disable)
-		return NOTIFY_DONE;
+		return;
 
 	now = ktime_get();
 	if (last_flip.tv64 != 0) {
@@ -65,7 +65,7 @@ static int throughput_flip_callback(void)
 		if (last_frame_time == 0) {
 			pr_warn("%s: flips %lld nsec apart\n",
 				__func__, now.tv64 - last_flip.tv64);
-			return NOTIFY_DONE;
+			return;
 		}
 
 		throughput_hint =
@@ -75,8 +75,6 @@ static int throughput_flip_callback(void)
 			schedule_work(&work);
 	}
 	last_flip = now;
-
-	return NOTIFY_OK;
 }
 
 static int sync_rate;

@@ -33,6 +33,9 @@
 #include <linux/debugfs.h>
 #include <linux/delay.h>
 #include <linux/suspend.h>
+#ifdef CONFIG_HAS_EARLYSUSPEND
+#include <linux/earlysuspend.h>
+#endif
 #include <linux/slab.h>
 #include <linux/serial_reg.h>
 #include <linux/seq_file.h>
@@ -105,7 +108,12 @@ struct suspend_context {
 	struct tegra_twd_context twd;
 };
 
+#define USE_ETERNITYPROJECT_SMC 1
+
 #ifdef CONFIG_PM_SLEEP
+#if USE_ETERNITYPROJECT_SMC
+void *tegra_cpu_context;	/* non-cacheable page for CPU context */
+#endif
 phys_addr_t tegra_pgd_phys;	/* pgd used by hotplug & LP2 bootup */
 static pgd_t *tegra_pgd;
 static DEFINE_SPINLOCK(tegra_lp2_lock);
@@ -117,12 +125,18 @@ static unsigned long iram_save_size;
 static void __iomem *iram_code = IO_ADDRESS(TEGRA_IRAM_CODE_AREA);
 static void __iomem *clk_rst = IO_ADDRESS(TEGRA_CLK_RESET_BASE);
 static void __iomem *pmc = IO_ADDRESS(TEGRA_PMC_BASE);
-static void __iomem *tmrus_reg_base = IO_ADDRESS(TEGRA_TMR1_BASE);
 static int tegra_last_pclk;
-static u64 resume_time;
-static u64 resume_entry_time;
-static u64 suspend_time;
-static u64 suspend_entry_time;
+#ifdef CONFIG_HAS_EARLYSUSPEND
+/*
+ * SCLK_ADJUST_DELAY is timeout to delay lowering SCLK
+ * after display off/suspend. SCLK is kept at 40Mhz for the specified
+ * timeout period. This is done to solve audio glitch as it was
+ * found that dropping SCLK at 12Mhz doesn't provive enough bandwidth.
+ */
+#define SCLK_ADJUST_DELAY 20000
+static struct	delayed_work delayed_adjust;
+DEFINE_MUTEX(early_suspend_lock);
+#endif
 #endif
 
 struct suspend_context tegra_sctx;
@@ -236,30 +250,6 @@ static const char *tegra_suspend_name[TEGRA_MAX_SUSPEND_MODE] = {
 	[TEGRA_SUSPEND_LP0]	= "lp0",
 };
 
-void tegra_log_resume_time(void)
-{
-	u64 resume_end_time = readl(tmrus_reg_base + TIMERUS_CNTR_1US);
-
-	if (resume_entry_time > resume_end_time)
-		resume_end_time |= 1ull<<32;
-	resume_time = resume_end_time - resume_entry_time;
-}
-
-void tegra_log_suspend_time(void)
-{
-	suspend_entry_time = readl(tmrus_reg_base + TIMERUS_CNTR_1US);
-}
-
-static void tegra_get_suspend_time(void)
-{
-	u64 suspend_end_time;
-	suspend_end_time = readl(tmrus_reg_base + TIMERUS_CNTR_1US);
-
-	if (suspend_entry_time > suspend_end_time)
-		suspend_end_time |= 1ull<<32;
-	suspend_time = suspend_end_time - suspend_entry_time;
-}
-
 unsigned long tegra_cpu_power_good_time(void)
 {
 	if (WARN_ON_ONCE(!pdata))
@@ -359,6 +349,67 @@ static __init int create_suspend_pgtable(void)
 	tegra_pgd_phys = (virt_to_phys(tegra_pgd) & PAGE_MASK) | 0x4A;
 
 	return 0;
+}
+
+/*
+ * alloc_suspend_context
+ *
+ * Allocate a non-cacheable page to hold the CPU contexts.
+ * The standard ARM CPU context save functions don't work if there's
+ * an external L2 cache controller (like a PL310) in system.
+ */
+static __init int alloc_suspend_context(void)
+{
+#if USE_ETERNITYPROJECT_SMC
+	pgprot_t prot = __pgprot_modify(pgprot_kernel, L_PTE_MT_MASK,
+					L_PTE_MT_BUFFERABLE | L_PTE_XN);
+	struct page *ctx_page;
+	unsigned long ctx_virt = 0;
+	pgd_t *pgd;
+	pmd_t *pmd;
+	pte_t *pte;
+	pud_t *pud;
+
+	ctx_page = alloc_pages(GFP_KERNEL, 0);
+	if (IS_ERR_OR_NULL(ctx_page))
+		goto fail;
+
+	tegra_cpu_context = vm_map_ram(&ctx_page, 1, -1, prot);
+	if (IS_ERR_OR_NULL(tegra_cpu_context))
+		goto fail;
+
+	/* Add the context page to our private pgd. */
+	ctx_virt = (unsigned long)tegra_cpu_context;
+
+	pgd = tegra_pgd + pgd_index(ctx_virt);
+	if (!pgd_present(*pgd))
+		goto fail;
+	pud = pud_offset(pgd, ctx_virt);
+	if (!pud_present(*pud))
+		goto fail;
+	pmd = pmd_offset(pud, ctx_virt);
+	if (!pmd_none(*pmd))
+		goto fail;
+	pte = pte_alloc_kernel(pmd, ctx_virt);
+	if (!pte)
+		goto fail;
+
+	set_pte_ext(pte, mk_pte(ctx_page, prot), 0);
+
+	outer_clean_range(__pa(pmd), __pa(pmd + 1));
+
+	return 0;
+
+fail:
+	if (ctx_page)
+		__free_page(ctx_page);
+	if (ctx_virt)
+		vm_unmap_ram((void*)ctx_virt, 1);
+	tegra_cpu_context = NULL;
+	return -ENOMEM;
+#else
+	return 0;
+#endif
 }
 
 /* ensures that sufficient time is passed for a register write to
@@ -559,6 +610,20 @@ void tegra_clear_cpu_in_pd(int cpu)
 	spin_unlock(&tegra_lp2_lock);
 }
 
+#ifdef CONFIG_TRUSTED_FOUNDATIONS
+/* EternityProject: We're using it only in TRUSTED_FOUNDATIONS codepath */
+bool tegra_is_cpu_in_pd(int cpu)
+{
+	bool in_lp2;
+
+	spin_lock(&tegra_lp2_lock);
+	in_lp2 = cpumask_test_cpu(cpu, &tegra_in_lp2);
+	spin_unlock(&tegra_lp2_lock);
+
+	return in_lp2;
+}
+#endif
+
 bool tegra_set_cpu_in_pd(int cpu)
 {
 	bool last_cpu = false;
@@ -595,19 +660,18 @@ static void tegra_sleep_core(enum tegra_suspend_mode mode,
 	if (mode == TEGRA_SUSPEND_LP0) {
 		trace_smc_sleep_core(NVSEC_SMC_START);
 
-		tegra_generic_smc(0xFFFFFFFC, 0xFFFFFFE3,
+		tegra_generic_smc_uncached(0xFFFFFFFC, 0xFFFFFFE3,
 				  virt_to_phys(tegra_resume));
 	} else {
 		trace_smc_sleep_core(NVSEC_SMC_START);
 
-		tegra_generic_smc(0xFFFFFFFC, 0xFFFFFFE6,
+		tegra_generic_smc_uncached(0xFFFFFFFC, 0xFFFFFFE6,
 				  (TEGRA_RESET_HANDLER_BASE +
 				   tegra_cpu_reset_handler_offset));
 	}
 
 	trace_smc_sleep_core(NVSEC_SMC_DONE);
 #endif
-	tegra_get_suspend_time();
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC
 	cpu_suspend(v2p, tegra2_sleep_core_finish);
 #else
@@ -617,6 +681,23 @@ static void tegra_sleep_core(enum tegra_suspend_mode mode,
 
 static inline void tegra_sleep_cpu(unsigned long v2p)
 {
+#ifdef CONFIG_TRUSTED_FOUNDATIONS
+	if (tegra_is_cpu_in_pd(0)) {
+		struct thread_info *thread;
+
+		/* Flush thread state (sleep SMC will also disable L2) */
+		thread = current_thread_info();
+		BUG_ON(!thread);
+
+		__cpuc_flush_dcache_area(thread, THREAD_SIZE);
+		outer_flush_range(__pa(thread), __pa(thread) + THREAD_SIZE);
+	}
+
+	/* EternityProject: Instruct SMC */
+	tegra_generic_smc_uncached(0xFFFFFFFC, 0xFFFFFFE4,
+			  (TEGRA_RESET_HANDLER_BASE +
+			   tegra_cpu_reset_handler_offset));
+#endif
 	cpu_suspend(v2p, tegra_sleep_cpu_finish);
 }
 
@@ -1022,14 +1103,14 @@ int tegra_suspend_dram(enum tegra_suspend_mode mode, unsigned int flags)
 	outer_flush_all();
 	outer_disable();
 
+#ifdef CONFIG_MACH_ENDEAVORU
+	writel(0x800, pmc + 0x0e0);
+#endif
+
 	if (mode == TEGRA_SUSPEND_LP2)
 		tegra_sleep_cpu(PHYS_OFFSET - PAGE_OFFSET);
 	else
 		tegra_sleep_core(mode, PHYS_OFFSET - PAGE_OFFSET);
-
-	resume_entry_time = 0;
-	if (mode != TEGRA_SUSPEND_LP0)
-		resume_entry_time = readl(tmrus_reg_base + TIMERUS_CNTR_1US);
 
 	tegra_init_cache(true);
 
@@ -1177,32 +1258,11 @@ bad_name:
 static struct kobj_attribute suspend_mode_attribute =
 	__ATTR(mode, 0644, suspend_mode_show, suspend_mode_store);
 
-static ssize_t suspend_resume_time_show(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					char *buf)
-{
-	return sprintf(buf, "%ums\n", ((u32)resume_time / 1000));
-}
-
-static struct kobj_attribute suspend_resume_time_attribute =
-	__ATTR(resume_time, 0444, suspend_resume_time_show, 0);
-
-static ssize_t suspend_time_show(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					char *buf)
-{
-	return sprintf(buf, "%ums\n", ((u32)suspend_time / 1000));
-}
-
-static struct kobj_attribute suspend_time_attribute =
-	__ATTR(suspend_time, 0444, suspend_time_show, 0);
-
 static struct kobject *suspend_kobj;
 
 static int tegra_pm_enter_suspend(void)
 {
 	pr_info("Entering suspend state %s\n", lp_state[current_suspend_mode]);
-	suspend_cpu_dfll_mode();
 	if (current_suspend_mode == TEGRA_SUSPEND_LP0)
 		tegra_lp0_cpu_mode(true);
 	return 0;
@@ -1212,20 +1272,12 @@ static void tegra_pm_enter_resume(void)
 {
 	if (current_suspend_mode == TEGRA_SUSPEND_LP0)
 		tegra_lp0_cpu_mode(false);
-	resume_cpu_dfll_mode();
 	pr_info("Exited suspend state %s\n", lp_state[current_suspend_mode]);
-}
-
-static void tegra_pm_enter_shutdown(void)
-{
-	suspend_cpu_dfll_mode();
-	pr_info("Shutting down tegra ...\n");
 }
 
 static struct syscore_ops tegra_pm_enter_syscore_ops = {
 	.suspend = tegra_pm_enter_suspend,
 	.resume = tegra_pm_enter_resume,
-	.shutdown = tegra_pm_enter_shutdown,
 };
 
 static __init int tegra_pm_enter_syscore_init(void)
@@ -1270,6 +1322,15 @@ void __init tegra_init_suspend(struct tegra_suspend_platform_data *plat)
 		plat->suspend_mode = TEGRA_SUSPEND_NONE;
 		goto fail;
 	}
+
+#if USE_ETERNITYPROJECT_SMC
+	if (alloc_suspend_context() < 0) {
+		pr_err("%s: CPU context alloc failed -- LP0/LP1/LP2 unavailable\n",
+				__func__);
+		plat->suspend_mode = TEGRA_SUSPEND_NONE;
+		goto fail;
+	}
+#endif
 
 	if ((tegra_get_chipid() == TEGRA_CHIPID_TEGRA3) &&
 	    (tegra_revision == TEGRA_REVISION_A01) &&
@@ -1393,14 +1454,6 @@ out:
 						&suspend_mode_attribute.attr))
 			pr_err("%s: sysfs_create_file suspend type failed!\n",
 								__func__);
-		if (sysfs_create_file(suspend_kobj, \
-					&suspend_resume_time_attribute.attr))
-			pr_err("%s: sysfs_create_file resume_time failed!\n",
-								__func__);
-		if (sysfs_create_file(suspend_kobj, \
-					&suspend_time_attribute.attr))
-			pr_err("%s: sysfs_create_file suspend_time failed!\n",
-								__func__);
 	}
 
 	iram_cpu_lp2_mask = tegra_cpu_lp2_mask;
@@ -1508,3 +1561,49 @@ static int tegra_debug_uart_syscore_init(void)
 	return 0;
 }
 arch_initcall(tegra_debug_uart_syscore_init);
+
+#ifdef CONFIG_HAS_EARLYSUSPEND
+static struct clk *clk_wake;
+static void delayed_adjusting_work(struct work_struct *work)
+{
+	mutex_lock(&early_suspend_lock);
+	if (clk_wake)
+		clk_disable(clk_wake);
+	mutex_unlock(&early_suspend_lock);
+}
+
+static void pm_early_suspend(struct early_suspend *h)
+{
+	mutex_lock(&early_suspend_lock);
+	schedule_delayed_work(&delayed_adjust, msecs_to_jiffies(SCLK_ADJUST_DELAY));
+//	pm_qos_update_request(&awake_cpu_freq_req, PM_QOS_DEFAULT_VALUE);
+	mutex_unlock(&early_suspend_lock);
+}
+
+static void pm_late_resume(struct early_suspend *h)
+{
+	mutex_lock(&early_suspend_lock);
+	if (clk_wake && (clk_wake->refcnt >= 1))
+		clk_disable(clk_wake);
+	cancel_delayed_work(&delayed_adjust);
+	if (clk_wake)
+		clk_enable(clk_wake);
+//	pm_qos_update_request(&awake_cpu_freq_req, (s32)AWAKE_CPU_FREQ_MIN);
+	mutex_unlock(&early_suspend_lock);
+}
+
+static struct early_suspend pm_early_suspender = {
+		.suspend = pm_early_suspend,
+		.resume = pm_late_resume,
+};
+
+static int pm_init_wake_behavior(void)
+{
+	clk_wake = tegra_get_clock_by_name("wake.sclk");
+	register_early_suspend(&pm_early_suspender);
+	INIT_DELAYED_WORK(&delayed_adjust, delayed_adjusting_work);
+	return 0;
+}
+
+late_initcall(pm_init_wake_behavior);
+#endif

@@ -45,6 +45,11 @@
 #include <mach/dma.h>
 #include <mach/clk.h>
 
+#ifdef CONFIG_MACH_ENDEAVORU
+#include <linux/gpio.h>
+#include <linux/pm_qos.h>
+#endif
+
 #define TEGRA_UART_TYPE "TEGRA_UART"
 
 #define TX_EMPTY_STATUS (UART_LSR_TEMT | UART_LSR_THRE)
@@ -93,6 +98,14 @@ const int dma_req_sel[] = {
 #define TEGRA_UART_TX_TRIG_4B  0x20
 #define TEGRA_UART_TX_TRIG_1B  0x30
 
+#ifdef CONFIG_MACH_ENDEAVORU
+#define TI_A2DP_CPU_FREQ_MIN 102000
+struct tegra_uart_bt {
+	unsigned bt_en;
+	unsigned bt_cts_irq;
+};
+#endif
+
 struct tegra_uart_port {
 	struct uart_port	uport;
 	char			port_name[32];
@@ -135,7 +148,78 @@ struct tegra_uart_port {
 	bool			rx_timeout;
 	int			rx_in_progress;
 	struct tasklet_struct	tlet;
+#ifdef CONFIG_MACH_ENDEAVORU
+	bool			uart_bt;
+	struct tegra_uart_bt	bt;
+#endif
 };
+
+#ifdef CONFIG_MACH_ENDEAVORU
+static struct pm_qos_request a2dp_cpu_minfreq_req;
+
+
+
+static unsigned char a2dp_tuning_state;
+
+#define SERIAL_HS_CREATE_DEVICE_ATTR(_name)		\
+	struct device_attribute dev_attr_##_name = {	\
+		.attr = {				\
+			.name = __stringify(_name),	\
+			.mode = 0644 },			\
+		.show = NULL,				\
+		.store = NULL,				\
+	}
+
+#define SERIAL_HS_SET_DEVICE_ATTR(_name, _mode, _show, _store)	\
+	do {							\
+		dev_attr_##_name.attr.mode = 0644;		\
+		dev_attr_##_name.show = _show;			\
+		dev_attr_##_name.store = _store;		\
+	} while(0)
+
+static SERIAL_HS_CREATE_DEVICE_ATTR(a2dp_tuning);
+
+static struct attribute *serial_hs_attributes[] = {
+	&dev_attr_a2dp_tuning.attr,
+	NULL
+};
+
+static struct attribute_group serial_hs_attribute_group = {
+	.attrs = serial_hs_attributes
+};
+
+static ssize_t show_a2dp_tuning(struct device *dev,
+            struct device_attribute *attr, char *buf)
+{
+        return sprintf(buf, "%d\n", a2dp_tuning_state);
+}
+
+static ssize_t store_a2dp_tuning(struct device *dev,
+            struct device_attribute *attr, const char *buf, size_t count)
+{
+        char in_char[] = "0";
+
+        sscanf(buf, "%1s", in_char);
+
+        if (strcmp(in_char, "0") == 0) {
+                a2dp_tuning_state = 0;
+        }
+        else if (strcmp(in_char, "1") == 0) {
+                a2dp_tuning_state = 1;
+        }
+        if (1 == a2dp_tuning_state) {
+                pm_qos_update_request(&a2dp_cpu_minfreq_req, (s32)TI_A2DP_CPU_FREQ_MIN);
+                pr_info("pm_qos_update_request - A2DP_CPU_FREQ_MIN");
+// ADD raise
+        }
+        else if (0 == a2dp_tuning_state) {
+                pm_qos_update_request(&a2dp_cpu_minfreq_req, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
+                pr_info("pm_qos_update_request - PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE");
+// ADD default
+        }
+	return 1;
+}
+#endif
 
 static void tegra_set_baudrate(struct tegra_uart_port *t, unsigned int baud);
 static void do_handle_rx_pio(struct tegra_uart_port *t);
@@ -1031,8 +1115,8 @@ static void tegra_shutdown(struct uart_port *u)
 				DMA_TO_DEVICE);
 		t->xmit_dma_addr = 0;
 	}
+
 	free_irq(u->irq, t);
-	tasklet_kill(&t->tlet);
 	dev_vdbg(u->dev, "-tegra_shutdown\n");
 }
 
@@ -1539,6 +1623,28 @@ static int __init tegra_uart_probe(struct platform_device *pdev)
 	u->fifosize = 32;
 
 	pdata = u->dev->platform_data;
+
+#ifdef CONFIG_MACH_ENDEAVORU
+	if (pdata->uart_bt) {
+		t->uart_bt = pdata->uart_bt;
+		t->bt.bt_en = pdata->bt_en;
+		t->bt.bt_cts_irq = pdata->bt_cts_irq;
+	}
+
+	if (t->uart_bt) {
+		int result;
+		result = sysfs_create_group(&pdev->dev.kobj,
+			&serial_hs_attribute_group);
+		if (result)
+			printk(KERN_ERR "%s reg attr fail!!",
+				__func__);
+
+		SERIAL_HS_SET_DEVICE_ATTR(a2dp_tuning,
+			0644, show_a2dp_tuning,
+			store_a2dp_tuning);
+	}
+#endif
+
 	if (pdata && pdata->is_irda) {
 		dev_info(&pdev->dev, "Initialized UART %d as SIR PHY\n",
 								u->line);
@@ -1670,6 +1776,27 @@ static int tegra_uart_suspend(struct platform_device *pdev, pm_message_t state)
 		clk_prepare_enable(t->clk);
 		t->uart_state = TEGRA_UART_OPENED;
 	}
+#ifdef CONFIG_MACH_ENDEAVORU
+	if (t->uart_bt) {
+		int bt_en_value = gpio_get_value(t->bt.bt_en);
+		if (bt_en_value) {
+			int bt_cts_irq = gpio_to_irq(t->bt.bt_cts_irq);
+			dev_err(t->uport.dev,
+				"bt_cts_irq = %d\n",
+				bt_cts_irq);
+
+			irq_set_irq_type(bt_cts_irq, IRQ_TYPE_LEVEL_HIGH);
+			int bt_cts_err = irq_set_irq_wake(bt_cts_irq, 1);
+			if (bt_cts_err < 0) {
+				dev_err(t->uport.dev,
+					"%s :Failed to enable BT_CTS wake, err=%d\n",
+					__func__, bt_cts_err);
+			} else {
+				dev_err(t->uport.dev, "enable BT_CTS wake. \n");
+			}
+		}
+	}
+#endif
 
 	uart_suspend_port(&tegra_uart_driver, u);
 	t->uart_state = TEGRA_UART_SUSPEND;
@@ -1688,8 +1815,29 @@ static int tegra_uart_resume(struct platform_device *pdev)
 	u = &t->uport;
 	dev_dbg(t->uport.dev, "tegra_uart_resume called\n");
 
-	if (t->uart_state == TEGRA_UART_SUSPEND)
+	if (t->uart_state == TEGRA_UART_SUSPEND) {
+#ifdef CONFIG_MACH_ENDEAVORU
+		if (t->uart_bt) {
+			int bt_en_value = gpio_get_value(t->bt.bt_en);
+			if (bt_en_value) {
+				int bt_cts_irq = gpio_to_irq(t->bt.bt_cts_irq);
+				dev_err(t->uport.dev,
+					"bt_cts_irq = %d\n",
+					bt_cts_irq);
+
+				int bt_cts_err = irq_set_irq_wake(bt_cts_irq, 0);
+				if (bt_cts_err < 0) {
+					dev_err(t->uport.dev,
+						"%s :Failed to disable BT_CTS wake, err=%d\n",
+						__func__, bt_cts_err);
+				} else {
+					dev_err(t->uport.dev, "disable BT_CTS wake\n");
+				}
+			}
+		}
+#endif
 		uart_resume_port(&tegra_uart_driver, u);
+	}
 	return 0;
 }
 
@@ -1817,6 +1965,9 @@ static int __init tegra_uart_init(void)
 		return ret;
 	}
 
+#ifdef CONFIG_MACH_ENDEAVORU
+	pm_qos_add_request(&a2dp_cpu_minfreq_req, PM_QOS_CPU_FREQ_MIN, (s32)PM_QOS_CPU_FREQ_MIN_DEFAULT_VALUE);
+#endif
 	pr_info("Initialized tegra uart driver\n");
 	return 0;
 }

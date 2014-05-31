@@ -45,3 +45,7 @@ obj-$(CONFIG_BACKLIGHT_PCF50633)	+= pcf50633-backlight.o
 obj-$(CONFIG_BACKLIGHT_AAT2870) += aat2870_bl.o
 obj-$(CONFIG_BACKLIGHT_OT200) += ot200_bl.o
 obj-$(CONFIG_BACKLIGHT_MAX8831) += max8831_bl.o
+
+
+# EternityProject: Add LGE X3 Support
+obj-$(CONFIG_BACKLIGHT_LM353X)	+= lm3533_bl.o

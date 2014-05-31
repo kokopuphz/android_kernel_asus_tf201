@@ -93,7 +93,7 @@ static int wl1271_tm_cmd_test(struct wl1271 *wl, struct nlattr *tb[])
 
 	mutex_lock(&wl->mutex);
 
-	if (wl->state == WL1271_STATE_OFF) {
+	if (unlikely(wl->state != WLCORE_STATE_ON)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -151,7 +151,7 @@ static int wl1271_tm_cmd_interrogate(struct wl1271 *wl, struct nlattr *tb[])
 
 	mutex_lock(&wl->mutex);
 
-	if (wl->state == WL1271_STATE_OFF) {
+	if (unlikely(wl->state != WLCORE_STATE_ON)) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -279,7 +279,7 @@ static int wl12xx_tm_cmd_get_mac(struct wl1271 *wl, struct nlattr *tb[])
 		goto out;
 	}
 
-	if (wl->fuse_oui_addr == 0 && wl->fuse_nic_addr == 0) {
+	if(wl->fuse_oui_addr == 0 && wl->fuse_nic_addr == 0) {
 		ret = -EOPNOTSUPP;
 		goto out;
 	}

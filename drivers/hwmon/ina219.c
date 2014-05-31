@@ -267,9 +267,9 @@ static s32 show_power(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct ina219_data *data = i2c_get_clientdata(client);
-	s32 retval;
-	s32 power_mW;
-	s32 voltage_mV;
+	s32 retval = 0;
+	s32 power_mW = 0;
+	s32 voltage_mV = 0;
 	s32 overflow, conversion;
 	int cur_state;
 
@@ -336,9 +336,9 @@ static s32 show_current2(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct ina219_data *data = i2c_get_clientdata(client);
-	s32 current_mA;
-	s32 voltage_uV;
-	s32 inverse_shunt_resistor;
+	s32 current_mA = 0;
+	s32 voltage_uV = 0;
+	s32 inverse_shunt_resistor = 0;
 	int cur_state;
 #if INA219_DEBUG_PRINTS
 	s32 current_raw;
@@ -388,9 +388,9 @@ static s32 show_current(struct device *dev,
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct ina219_data *data = i2c_get_clientdata(client);
-	s32 retval;
-	s32 current_mA;
-	s32 voltage_mV;
+	s32 retval = 0;
+	s32 current_mA = 0;
+	s32 voltage_mV = 0;
 	s32 overflow, conversion;
 	int cur_state;
 

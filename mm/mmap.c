@@ -30,7 +30,6 @@
 #include <linux/perf_event.h>
 #include <linux/audit.h>
 #include <linux/khugepaged.h>
-#include <linux/tegra_profiler.h>
 
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
@@ -1364,7 +1363,6 @@ munmap_back:
 		atomic_inc(&inode->i_writecount);
 out:
 	perf_event_mmap(vma);
-	quadd_event_mmap(vma);
 
 	mm->total_vm += len >> PAGE_SHIFT;
 	vm_stat_account(mm, vm_flags, file, len >> PAGE_SHIFT);
@@ -1772,7 +1770,6 @@ int expand_upwards(struct vm_area_struct *vma, unsigned long address)
 			if (!error) {
 				vma->vm_end = address;
 				perf_event_mmap(vma);
-				quadd_event_mmap(vma);
 			}
 		}
 	}
@@ -1824,7 +1821,6 @@ int expand_downwards(struct vm_area_struct *vma,
 				vma->vm_start = address;
 				vma->vm_pgoff -= grow;
 				perf_event_mmap(vma);
-				quadd_event_mmap(vma);
 			}
 		}
 	}
@@ -2259,8 +2255,6 @@ static unsigned long do_brk(unsigned long addr, unsigned long len)
 	vma_link(mm, vma, prev, rb_link, rb_parent);
 out:
 	perf_event_mmap(vma);
-	quadd_event_mmap(vma);
-
 	mm->total_vm += len >> PAGE_SHIFT;
 	if (flags & VM_LOCKED) {
 		if (!mlock_vma_pages_range(vma, addr, addr + len))
@@ -2542,7 +2536,6 @@ int install_special_mapping(struct mm_struct *mm,
 	mm->total_vm += len >> PAGE_SHIFT;
 
 	perf_event_mmap(vma);
-	quadd_event_mmap(vma);
 
 	return 0;
 

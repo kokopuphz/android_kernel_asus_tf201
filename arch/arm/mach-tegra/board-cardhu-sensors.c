@@ -778,8 +778,7 @@ static int cardhu_nct1008_init(void)
 
 	if (nct1008_port >= 0) {
 		tegra_platform_edp_init(cardhu_nct1008_pdata.trips,
-					&cardhu_nct1008_pdata.num_trips,
-					0); /* edp temperature margin */
+					&cardhu_nct1008_pdata.num_trips);
 
 		cardhu_i2c4_nct1008_board_info[0].irq =
 						gpio_to_irq(nct1008_port);
@@ -822,7 +821,7 @@ static struct therm_est_data skin_data = {
 	.toffset = 9793,
 	.polling_period = 1100,
 	.ndevs = 2,
-	.tc1 = 10,
+	.tc1 = 5,
 	.tc2 = 1,
 	.devs = {
 			{
@@ -848,8 +847,8 @@ static struct therm_est_data skin_data = {
 				},
 			},
 	},
-	.trip_temp = 45000,
-	.passive_delay = 30000,
+	.trip_temp = 43000,
+	.passive_delay = 5000,
 };
 
 static struct throttle_table skin_throttle_table[] = {

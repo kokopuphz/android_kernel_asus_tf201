@@ -612,6 +612,15 @@ struct snd_soc_codec {
 	struct snd_soc_dapm_context dapm;
 	unsigned int ignore_pmdown_time:1; /* pmdown_time is ignored at stop */
 
+	/* endeavoru requirements */
+	bool is_call_mode;
+	int pla_device;
+	int capture_deviece;
+	int downlink_id;
+	int uplink_id;
+	int aic3008_dsp_id;
+	int es305_cfg_id;
+
 #ifdef CONFIG_DEBUG_FS
 	struct dentry *debugfs_codec_root;
 	struct dentry *debugfs_reg;

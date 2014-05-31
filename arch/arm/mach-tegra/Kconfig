@@ -25,7 +25,6 @@ config ARCH_TEGRA_2x_SOC
 	select ARCH_TEGRA_HAS_PCIE
 	select CPU_V7
 	select ARM_GIC
-	select ARM_SAVE_DEBUG_CONTEXT if PM_SLEEP
 	select ARCH_REQUIRE_GPIOLIB
 	select PINCTRL
 	select PINCTRL_TEGRA20
@@ -66,7 +65,6 @@ config ARCH_TEGRA_3x_SOC
 	select ARCH_TEGRA_HAS_DUAL_CPU_CLUSTERS
 	select CPU_V7
 	select ARM_GIC
-	select ARM_SAVE_DEBUG_CONTEXT if PM_SLEEP
 	select GIC_SET_MULTIPLE_CPUS if SMP
 	select ARCH_REQUIRE_GPIOLIB
 	select PINCTRL
@@ -74,7 +72,7 @@ config ARCH_TEGRA_3x_SOC
 	select USB_ARCH_HAS_EHCI if USB_SUPPORT
 	select USB_ULPI if USB
 	select USB_ULPI_VIEWPORT if USB_SUPPORT
-	select REPORT_PRESENT_CPUS if TEGRA_AUTO_HOTPLUG
+	select REPORT_PRESENT_CPUS
 	select ARCH_SUPPORTS_MSI if TEGRA_PCI
 	select PCI_MSI if TEGRA_PCI
 	select ARM_ERRATA_743622
@@ -92,6 +90,7 @@ config ARCH_TEGRA_3x_SOC
 	select TEGRA_LATENCY_ALLOWANCE if !TEGRA_FPGA_PLATFORM
 	select TEGRA_LATENCY_ALLOWANCE_SCALING if !TEGRA_FPGA_PLATFORM
 	select SOC_BUS
+	select OF
 	help
 	  Support for NVIDIA Tegra T30 processor family, based on the
 	  ARM CortexA9MP CPU and the ARM PL310 L2 cache controller
@@ -127,10 +126,7 @@ config ARCH_TEGRA_11x_SOC
 	select TEGRA_ISOMGR_DEBUG
 	select TEGRA_ERRATA_1157520
 	select TEGRA_CORE_EDP_LIMITS
-	select TEGRA_VDD_CORE_OVERRIDE
 	select TEGRA_THERMAL_THROTTLE_EXACT_FREQ
-	select ARM_ERRATA_799270
-	select ARM_ERRATA_798181
 	help
 	  Support for NVIDIA Tegra 11x family of SoCs, based upon the
 	  ARM Cortex-A15MP CPU
@@ -334,9 +330,12 @@ config MACH_ROTH
        depends on ARCH_TEGRA_11x_SOC
        select MACH_HAS_SND_SOC_TEGRA_RT5639 if SND_SOC
        select MACH_HAS_SND_SOC_TEGRA_RT5640 if SND_SOC
-       select TEGRA_CPU_FREQ_GOVERNOR_EARLY_INIT
        help
          Support for NVIDIA THOR development platform
+
+source "arch/arm/mach-tegra/eprj_enru/Kconfig"
+source "arch/arm/mach-tegra/eprj_x3/Kconfig"
+source "arch/arm/mach-tegra/eprj_generic/Kconfig"
 
 choice
        prompt "Tegra platform type"
@@ -450,6 +449,17 @@ config TEGRA_CORE_DVFS
 	depends on TEGRA_SILICON_PLATFORM
 	depends on TEGRA_CPU_DVFS
 	default y
+
+config ETERNITYPROJECT_GPUBOOST
+	bool "Use overclocked GPU freq tables for AP33"
+	depends on ARCH_TEGRA_3x_SOC
+	default n
+	help
+	  Boost the GPU clocks. 
+	  Specifically: 2D/3D max to 520MHz - host1x to 300MHz
+	  -- IMPORTANT --
+	  Not all the chips are made equal. That implies this
+	  option may work for you, but not for your friend.
 
 config TEGRA_IOVMM_GART
 	bool "Enable I/O virtual memory manager for GART"
@@ -608,9 +618,8 @@ config USB_HOTPLUG
 	default n
 
 config TEGRA_GADGET_BOOST_CPU_FREQ
-	int "Boost cpu frequency for tegra usb gadget"
-	range 0 1300 if ARCH_TEGRA_3x_SOC
-	range 0 1800 if ARCH_TEGRA_11x_SOC
+	int "Boost cpu frequency for tegra usb gadget (0-1300 mhz)"
+	range 0 1300
 	default 0
 	help
 	  Devices need to boost frequency of CPU when they are connected
@@ -618,17 +627,6 @@ config TEGRA_GADGET_BOOST_CPU_FREQ
 	  is the amount of the frequency (in mhz) to be boosted. If it is
 	  zero boosting frequency will not be enabled. This value will be
 	  used only by usb gadget driver.
-
-config TEGRA_CPU_FREQ_GOVERNOR_EARLY_INIT
-	bool "Initialize CPU governor to a performance after DVFS initialization"
-	default 0
-	help
-	  During a boot up, once DVFS is initialized, there is a period of
-	  time in which the frequency could adjusted higher before the userspace
-	  configures the governor by using a more performance governor for
-	  a faster boot up. Selecting this option will make the system to choose
-	  a performance governor once the DVFS initialization is complete. Userspace
-	  or init script can override the governor chosen here.
 
 config TEGRA_DYNAMIC_PWRDET
 	bool "Enable dynamic activation of IO level auto-detection"
@@ -914,13 +912,4 @@ config TEGRA_PLLM_SCALED
 	  granularity of possible memory rate steps. In this case PLLC
 	  provides a backup memory clock while PLLM is re-locking to the
 	  new rate.
-
-config TEGRA_VDD_CORE_OVERRIDE
-	bool "Enable core rail override support"
-	depends on TEGRA_SILICON_PLATFORM
-	default n
-	help
-	  When enabled, core rail can be fixed and locked at specified voltage
-	  within override range, and core modules clocks are capped at rates
-	  safe at override level.
 endif

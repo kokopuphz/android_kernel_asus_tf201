@@ -40,10 +40,6 @@ static unsigned int regulator_cur;
 /* Value to subtract from regulator current limit */
 static unsigned int edp_reg_override_mA = OVERRIDE_DEFAULT;
 
-/* mode to skip volt_temp_cap: 0: normal,  1: no-limit */
-static unsigned char edp_volt_temp_mode;
-static unsigned char edp_volt_temp_mode_new;
-
 static const unsigned int *system_edp_limits;
 
 static struct tegra_system_edp_entry *power_edp_limits;
@@ -137,29 +133,29 @@ static char __initdata tegra_edp_vdd_cpu_map[] = {
 	0x03, 0x23, 0x4b, 0x8c, 0x82, 0x6e, 0x5a, 0x03,
 	0x23, 0x55, 0x8c, 0x82, 0x64, 0x50, 0x04, 0x32,
 	0x17, 0x91, 0x87, 0x87, 0x87, 0x04, 0x32, 0x2d,
-	0x96, 0x8c, 0x8c, 0x8c, 0x04, 0x32, 0x3c, 0x96,
-	0x8c, 0x8c, 0x8c, 0x04, 0x32, 0x46, 0x96, 0x8c,
-	0x8c, 0x8c, 0x04, 0x32, 0x4b, 0x82, 0x78, 0x78,
-	0x78, 0x04, 0x32, 0x55, 0x82, 0x78, 0x78, 0x78,
+	0xaa, 0xa0, 0xa0, 0xa0, 0x04, 0x32, 0x3c, 0xaa,
+	0xa0, 0xa0, 0xa0, 0x04, 0x32, 0x46, 0xaa, 0xa0,
+	0xa0, 0xa0, 0x04, 0x32, 0x4b, 0x8c, 0x82, 0x64,
+	0x64, 0x04, 0x32, 0x55, 0x82, 0x78, 0x78, 0x78,
 	0x04, 0x2f, 0x17, 0x91, 0x87, 0x87, 0x87, 0x04,
-	0x2f, 0x2d, 0x96, 0x8c, 0x8c, 0x8c, 0x04, 0x2f,
-	0x3c, 0x96, 0x8c, 0x8c, 0x8c, 0x04, 0x2f, 0x46,
-	0x96, 0x8c, 0x8c, 0x82, 0x04, 0x2f, 0x4b, 0x82,
-	0x78, 0x78, 0x78, 0x04, 0x2f, 0x55, 0x82, 0x78,
+	0x2f, 0x2d, 0xaa, 0xa0, 0xa0, 0xa0, 0x04, 0x2f,
+	0x3c, 0xaa, 0xa0, 0xa0, 0xa0, 0x04, 0x2f, 0x46,
+	0xaa, 0xa0, 0xa0, 0xa0, 0x04, 0x2f, 0x4b, 0x8c,
+	0x82, 0x64, 0x64, 0x04, 0x2f, 0x55, 0x82, 0x78,
 	0x78, 0x78, 0x04, 0x28, 0x17, 0x91, 0x87, 0x87,
-	0x87, 0x04, 0x28, 0x2d, 0x96, 0x8c, 0x8c, 0x82,
-	0x04, 0x28, 0x3c, 0x96, 0x8c, 0x8c, 0x82, 0x04,
-	0x28, 0x46, 0x96, 0x8c, 0x8c, 0x78, 0x04, 0x28,
-	0x4b, 0x82, 0x78, 0x78, 0x78, 0x04, 0x28, 0x55,
-	0x82, 0x78, 0x78, 0x6e, 0x04, 0x23, 0x17, 0x91,
-	0x87, 0x87, 0x73, 0x04, 0x23, 0x2d, 0x96, 0x8c,
-	0x8c, 0x78, 0x04, 0x23, 0x3c, 0x96, 0x8c, 0x82,
-	0x78, 0x04, 0x23, 0x46, 0x96, 0x8c, 0x82, 0x6e,
-	0x04, 0x23, 0x4b, 0x82, 0x78, 0x78, 0x6e, 0x04,
-	0x23, 0x55, 0x82, 0x78, 0x78, 0x64, 0x04, 0x1e,
+	0x87, 0x04, 0x28, 0x2d, 0xaa, 0xa0, 0xa0, 0xa0,
+	0x04, 0x28, 0x3c, 0xaa, 0xa0, 0xa0, 0xa0, 0x04,
+	0x28, 0x46, 0xaa, 0xa0, 0xa0, 0xa0, 0x04, 0x28,
+	0x4b, 0x8c, 0x82, 0x64, 0x64, 0x04, 0x28, 0x55,
+	0x82, 0x78, 0x78, 0x78, 0x04, 0x23, 0x17, 0x91,
+	0x87, 0x87, 0x87, 0x04, 0x23, 0x2d, 0xaa, 0xa0,
+	0xa0, 0xa0, 0x04, 0x23, 0x3c, 0xaa, 0xa0, 0xa0,
+	0xa0, 0x04, 0x23, 0x46, 0xaa, 0xa0, 0xa0, 0xa0,
+	0x04, 0x23, 0x4b, 0x8c, 0x82, 0x64, 0x64, 0x04,
+	0x23, 0x55, 0x82, 0x78, 0x78, 0x78, 0x04, 0x1e,
 	0x17, 0x91, 0x87, 0x7d, 0x69, 0x04, 0x1e, 0x2d,
-	0x96, 0x8c, 0x82, 0x6e, 0x04, 0x1e, 0x3c, 0x96,
-	0x8c, 0x78, 0x64, 0x04, 0x1e, 0x46, 0x96, 0x8c,
+	0xaa, 0xa0, 0x8c, 0x6e, 0x04, 0x1e, 0x3c, 0xa0,
+	0x96, 0x78, 0x64, 0x04, 0x1e, 0x46, 0xa0, 0x96,
 	0x78, 0x5a, 0x04, 0x1e, 0x4b, 0x82, 0x78, 0x78,
 	0x5a, 0x04, 0x1e, 0x55, 0x82, 0x78, 0x64, 0x50,
 	0x04, 0x19, 0x17, 0x91, 0x87, 0x69, 0x55, 0x04,
@@ -337,7 +333,7 @@ static struct tegra_system_edp_entry power_edp_default_limits[] = {
 
 /* Constants for EDP calculations */
 static const int temperatures[] = { /* degree celcius (C) */
-	23, 40, 50, 60, 68, 74, 78, 82, 86, 90, 94, 98, 102,
+	23, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100, 105,
 };
 static const int power_cap_levels[] = { /* milliwatts (mW) */
 	500, 1000, 1500, 2000, 2500, 3000, 3500,
@@ -378,7 +374,6 @@ static struct tegra_edp_cpu_leakage_params leakage_params[] = {
 			   {   15618709,   -4576116,   158401,  -1538, },
 			 },
 		 },
-		.volt_temp_cap = { 68, 1240 },
 	},
 	{
 		.cpu_speedo_id	    = 1, /* A01P+ CPU */
@@ -411,7 +406,6 @@ static struct tegra_edp_cpu_leakage_params leakage_params[] = {
 			 },
 		 },
 		.safety_cap = { 1810500, 1810500, 1606500, 1606500 },
-		.volt_temp_cap = { 68, 1240 },
 	},
 	{
 		.cpu_speedo_id	    = 2, /* A01P+ fast CPU */
@@ -443,8 +437,7 @@ static struct tegra_edp_cpu_leakage_params leakage_params[] = {
 			   {   15618709,   -4576116,   158401,  -1538, },
 			 },
 		 },
-		.safety_cap = { 1912500, 1912500, 1912500, 1912500 },
-		.volt_temp_cap = { 68, 1240 },
+		.safety_cap = { 1912500, 1912500, 1708500, 1708500 },
 	},
 };
 
@@ -474,8 +467,7 @@ static inline s64 edp_pow(s64 val, int pwr)
  * temp_C - always valid
  * power_mW - valid or -1 (infinite)
  */
-static unsigned int edp_calculate_maxf(
-				struct tegra_edp_cpu_leakage_params *params,
+unsigned int edp_calculate_maxf(struct tegra_edp_cpu_leakage_params *params,
 				int temp_C, int power_mW,
 				int iddq_mA,
 				int n_cores_idx)
@@ -489,12 +481,6 @@ static unsigned int edp_calculate_maxf(
 	for (f = freq_voltage_lut_size - 1; f >= 0; f--) {
 		freq_KHz = freq_voltage_lut[f].freq / 1000;
 		voltage_mV = freq_voltage_lut[f].voltage_mV;
-
-		/* Constrain Volt-Temp. Eg. at Tj >= 70C, no VDD_CPU > 1.24V */
-		if (edp_volt_temp_mode == 0 &&
-		    temp_C > params->volt_temp_cap.temperature &&
-		    voltage_mV > params->volt_temp_cap.voltage_limit_mV)
-			continue;
 
 		/* Calculate leakage current */
 		leakage_mA = 0;
@@ -587,7 +573,7 @@ unsigned int tegra_edp_find_maxf(int volt)
 }
 
 
-static int edp_find_speedo_idx(int cpu_speedo_id, unsigned int *cpu_speedo_idx)
+int edp_find_speedo_idx(int cpu_speedo_id, unsigned int *cpu_speedo_idx)
 {
 	int i;
 
@@ -673,7 +659,7 @@ static int init_cpu_edp_limits_calculated(void)
 	for (n_cores_idx = 0; n_cores_idx < NR_CPUS; n_cores_idx++) {
 		for (temp_idx = 0;
 		     temp_idx < ARRAY_SIZE(temperatures); temp_idx++) {
-			edp_calculated_limits[temp_idx].temperature =
+			edp_calculated_limits[temp_idx]. temperature =
 				temperatures[temp_idx];
 			limit = edp_calculate_maxf(params,
 						   temperatures[temp_idx],
@@ -878,8 +864,7 @@ void tegra_get_system_edp_limits(const unsigned int **limits)
 	*limits = system_edp_limits;
 }
 
-void tegra_platform_edp_init(struct thermal_trip_info *trips,
-				int *num_trips, int margin)
+void tegra_platform_edp_init(struct thermal_trip_info *trips, int *num_trips)
 {
 	const struct tegra_edp_limits *cpu_edp_limits;
 	struct thermal_trip_info *trip_state;
@@ -899,7 +884,7 @@ void tegra_platform_edp_init(struct thermal_trip_info *trips,
 
 		trip_state->cdev_type = "cpu_edp";
 		trip_state->trip_temp =
-			(cpu_edp_limits[i].temperature * 1000) - margin;
+			cpu_edp_limits[i].temperature * 1000;
 		trip_state->trip_type = THERMAL_TRIP_ACTIVE;
 		trip_state->upper = trip_state->lower = i + 1;
 		trip_state->hysteresis = 1000;
@@ -972,9 +957,8 @@ static int edp_debugfs_show(struct seq_file *s, void *data)
 
 static int edp_reg_override_show(struct seq_file *s, void *data)
 {
-	seq_printf(s, "Limit override: %u mA. Real limit: %u mA (mode %u)\n",
-		   edp_reg_override_mA, regulator_cur - edp_reg_override_mA,
-		   edp_volt_temp_mode);
+	seq_printf(s, "Limit override: %u mA. Effective limit: %u mA\n",
+		   edp_reg_override_mA, regulator_cur - edp_reg_override_mA);
 	return 0;
 }
 
@@ -1120,45 +1104,6 @@ vdd_cpu_dir_err:
 edp_dir_err:
 	return -ENOMEM;
 }
-
-int tegra_edp_volt_temp_mode_set(const char *arg, const struct kernel_param *kp)
-{
-	int ret;
-
-	ret = param_set_bool(arg, kp);
-	if (ret)
-		return ret;
-
-	if (edp_volt_temp_mode_new == edp_volt_temp_mode)
-		return 0;
-
-	edp_volt_temp_mode = edp_volt_temp_mode_new;
-	if (init_cpu_edp_limits_calculated())
-		pr_err("FAILED: Reinitialize VDD_CPU EDP table\n");
-
-	if (tegra_cpu_set_speed_cap(NULL)) {
-		pr_err("FAILED: Set CPU freq cap with new VDD_CPU EDP table\n");
-		return 0;
-	}
-
-	pr_info("Reinitialized VDD_CPU EDP table with volt_temp mode %u\n",
-		edp_volt_temp_mode);
-
-	return 0;
-}
-
-int tegra_edp_volt_temp_mode_get(char *buffer, const struct kernel_param *kp)
-{
-	return param_get_bool(buffer, kp);
-}
-
-static struct kernel_param_ops tegra_edp_volt_temp_mode_ops = {
-	.set = tegra_edp_volt_temp_mode_set,
-	.get = tegra_edp_volt_temp_mode_get,
-};
-
-module_param_cb(edp_volt_temp_mode, &tegra_edp_volt_temp_mode_ops,
-	&edp_volt_temp_mode_new, 0644);
 
 late_initcall(tegra_edp_debugfs_init);
 #endif /* CONFIG_DEBUG_FS */

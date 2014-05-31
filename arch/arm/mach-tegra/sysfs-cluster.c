@@ -126,32 +126,32 @@ static ssize_t sysfscluster_store(struct kobject *kobj,
 
 /* Active CPU: "G", "LP", "toggle" */
 static struct kobj_attribute cluster_active_attr =
-		__ATTR(active, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(active, 0644, sysfscluster_show, sysfscluster_store);
 
 /* Immediate wake-up when performing switch: 0, 1 */
 static struct kobj_attribute cluster_immediate_attr =
-		__ATTR(immediate, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(immediate, 0644, sysfscluster_show, sysfscluster_store);
 
 /* Force power transition even if already on the desired CPU: 0, 1 */
 static struct kobj_attribute cluster_force_attr =
-		__ATTR(force, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(force, 0644, sysfscluster_show, sysfscluster_store);
 
 /* Wake time (in milliseconds) */
 static struct kobj_attribute cluster_wake_ms_attr =
-		__ATTR(wake_ms, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(wake_ms, 0644, sysfscluster_show, sysfscluster_store);
 
 #if defined(CONFIG_PM_SLEEP) && SYSFS_CLUSTER_POWER_MODE
 /* LPx power mode to use when switching CPUs: 1=LP1, 2=LP2 */
 static unsigned int power_mode = 2;
 static struct kobj_attribute cluster_powermode_attr =
-		__ATTR(power_mode, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(power_mode, 0644, sysfscluster_show, sysfscluster_store);
 #endif
 
 #ifdef CONFIG_ARCH_TEGRA_HAS_SYMMETRIC_CPU_PWR_GATE
 /* Additional partitions to power gate. */
 static unsigned int power_gate = TEGRA_POWER_CLUSTER_PART_CRAIL;
 static struct kobj_attribute cluster_powergate_attr =
-		__ATTR(power_gate, 0640, sysfscluster_show, sysfscluster_store);
+		__ATTR(power_gate, 0644, sysfscluster_show, sysfscluster_store);
 
 static const char *decode_power_gate(unsigned int mode)
 {

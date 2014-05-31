@@ -46,7 +46,7 @@ struct nvhost_syncpt {
 	struct nvhost_syncpt_attr *syncpt_attrs;
 };
 
-int nvhost_syncpt_init(struct platform_device *, struct nvhost_syncpt *);
+int nvhost_syncpt_init(struct nvhost_device *, struct nvhost_syncpt *);
 void nvhost_syncpt_deinit(struct nvhost_syncpt *);
 
 #define syncpt_to_dev(sp) container_of(sp, struct nvhost_master, syncpt)
@@ -120,7 +120,6 @@ bool nvhost_syncpt_is_expired(struct nvhost_syncpt *sp, u32 id, u32 thresh);
 void nvhost_syncpt_save(struct nvhost_syncpt *sp);
 
 void nvhost_syncpt_reset(struct nvhost_syncpt *sp);
-void nvhost_syncpt_reset_client(struct platform_device *pdev);
 
 u32 nvhost_syncpt_read(struct nvhost_syncpt *sp, u32 id);
 u32 nvhost_syncpt_read_wait_base(struct nvhost_syncpt *sp, u32 id);

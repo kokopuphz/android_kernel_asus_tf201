@@ -35,8 +35,6 @@
 #define AR3D_GSHIM_WRITE_MASK 0xb00
 #define AR3D_GSHIM_READ_SELECT 0xb01
 #define AR3D_GLOBAL_MEMORY_OUTPUT_READS 0xe40
-#define AR3D_PIPEALIAS_DW_MEMORY_OUTPUT_DATA 0xc10
-#define AR3D_PIPEALIAS_DW_MEMORY_OUTPUT_INCR 0xc20
 
 struct nvhost_hwctx;
 struct nvhost_channel;
@@ -54,6 +52,6 @@ struct host1x_hwctx *nvhost_3dctx_alloc_common(
 void nvhost_3dctx_get(struct nvhost_hwctx *ctx);
 void nvhost_3dctx_free(struct kref *ref);
 void nvhost_3dctx_put(struct nvhost_hwctx *ctx);
-int nvhost_gr3d_prepare_power_off(struct platform_device *dev);
+int nvhost_gr3d_prepare_power_off(struct nvhost_device *dev);
 
 #endif

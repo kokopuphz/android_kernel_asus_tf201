@@ -1,6 +1,7 @@
 config ARM
 	bool
 	default y
+	select ARCH_HAVE_CUSTOM_GPIO_H
 	select HAVE_AOUT
 	select HAVE_DMA_API_DEBUG
 	select HAVE_IDE if PCI || ISA || PCMCIA
@@ -22,8 +23,9 @@ config ARM
 	select ARCH_BINFMT_ELF_RANDOMIZE_PIE
 	select HAVE_GENERIC_DMA_COHERENT
 	select HAVE_KERNEL_GZIP
-	select HAVE_KERNEL_LZO
+	select HAVE_KERNEL_LZ4
 	select HAVE_KERNEL_LZMA
+	select HAVE_KERNEL_LZO
 	select HAVE_KERNEL_XZ
 	select HAVE_IRQ_WORK
 	select HAVE_PERF_EVENTS
@@ -36,6 +38,7 @@ config ARM
 	select CPU_PM if (SUSPEND || CPU_IDLE)
 	select GENERIC_PCI_IOMAP
 	select HAVE_BPF_JIT if NET
+	select GENERIC_SMP_IDLE_THREAD
 	help
 	  The ARM series is a line of low-power-consumption RISC chip designs
 	  licensed by ARM Ltd and targeted at embedded applications and
@@ -592,6 +595,7 @@ config ARCH_KIRKWOOD
 	bool "Marvell Kirkwood"
 	select CPU_FEROCEON
 	select PCI
+	select PCI_QUIRKS
 	select ARCH_REQUIRE_GPIOLIB
 	select GENERIC_CLOCKEVENTS
 	select NEED_MACH_IO_H
@@ -693,6 +697,7 @@ config ARCH_TEGRA
 	select ARCH_PROVIDES_UDELAY
 	select FIQ
 	select PCI
+	select USE_OF
 	help
 	  This enables support for NVIDIA Tegra based systems (Tegra APX,
 	  Tegra 6xx and Tegra 2 series).
@@ -1450,30 +1455,15 @@ config PL310_ERRATA_769419
 	  on systems with an outer cache, the store buffer is drained
 	  explicitly.
 
-config ARM_ERRATA_798181
-	bool "ARM errata: TLBI/DSB failure on Cortex-A15"
-	depends on CPU_V7 && SMP
-	help
-	  On Cortex-A15 (r0p0..r3p2) the TLBI*IS/DSB operations are not
-	  adequately shooting down all use of the old entries. This
-	  option enables the Linux kernel workaround for this erratum
-	  which sends an IPI to the CPUs that are running the same mm
-	  (and ASID) as the one being invalidated.
-
-config ARM_ERRATA_799270
-	bool "ARM errata: Writing ACTLR.SMP when the L2 cache has been idle for an extended period may not work correctly"
-	depends on CPU_V7 && SMP
-	help
-	  This option enables the workaround for the 799270 Cortex-A15 (r2p0,
-	  r2p1, r2p2, r2p3, r2p4) erratum. If the L2 cache logic clock is
-	  stopped because of L2 inactivity, setting or clearing the ACTLR.SMP
-	  bit might not be effective. The bit is modified in the ACTLR, meaning
-	  a read of the register returns the updated value. However the logic
-	  that uses that bit retains the previous value. The workaround is to
-	  do a memory read to a memory location with Non-cacheable, Strongly-
-	  ordered, or Device memory attributes. A dependency must be created
-	  between the returning load data and the MCR instruction that sets the
-	  ACTLR.SMP bit.
+config ARM_ERRATA_775420
+       bool "ARM errata: A data cache maintenance operation which aborts, might lead to deadlock"
+       depends on CPU_V7
+       help
+	 This option enables the workaround for the 775420 Cortex-A9 (r2p2,
+	 r2p6,r2p8,r2p10,r3p0) erratum. In case a date cache maintenance
+	 operation aborts with MMU exception, it might cause the processor
+	 to deadlock. This workaround puts DSB before executing ISB if
+	 an abort may occur on cache maintenance.
 
 endmenu
 
@@ -2124,6 +2114,25 @@ config ARM_ATAG_DTB_COMPAT
 	  bootloaders, this option allows zImage to extract the information
 	  from the ATAG list and store it at run time into the appended DTB.
 
+choice
+	prompt "Kernel command line type" if ARM_ATAG_DTB_COMPAT
+	default ARM_ATAG_DTB_COMPAT_CMDLINE_FROM_BOOTLOADER
+
+config ARM_ATAG_DTB_COMPAT_CMDLINE_FROM_BOOTLOADER
+	bool "Use bootloader kernel arguments if available"
+	help
+	  Uses the command-line options passed by the boot loader instead of
+	  the device tree bootargs property. If the boot loader doesn't provide
+	  any, the device tree bootargs property will be used.
+
+config ARM_ATAG_DTB_COMPAT_CMDLINE_EXTEND
+	bool "Extend with bootloader kernel arguments"
+	help
+	  The command-line arguments provided by the boot loader will be
+	  appended to the the device tree bootargs property.
+
+endchoice
+
 config CMDLINE
 	string "Default kernel command string"
 	default ""
@@ -2246,6 +2255,7 @@ source "drivers/cpufreq/Kconfig"
 config CPU_FREQ_IMX
 	tristate "CPUfreq driver for i.MX CPUs"
 	depends on ARCH_MXC && CPU_FREQ
+	select CPU_FREQ_TABLE
 	help
 	  This enables the CPUfreq driver for i.MX CPUs.
 

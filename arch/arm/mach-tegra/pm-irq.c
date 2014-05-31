@@ -60,6 +60,8 @@ module_param(debug_lp0, bool, S_IRUGO | S_IWUSR);
 static bool warn_prevent_lp0;
 module_param(warn_prevent_lp0, bool, S_IRUGO | S_IWUSR);
 
+int global_wakeup_state;
+
 bool tegra_pm_irq_lp0_allowed(void)
 {
 	return (tegra_prevent_lp0 == 0);
@@ -218,6 +220,10 @@ static void tegra_pm_irq_syscore_resume_helper(
 		pr_info("Resume caused by WAKE%d, %s\n", (wake + 32 * index),
 			desc->action->name);
 
+		global_wakeup_state = (wake + 32 * index);
+		pr_info("global_wakeup_state is %d, wake_status is %ld\n",
+				global_wakeup_state, wake_status);
+
 		tegra_wake_irq_count[wake + 32 * index]++;
 
 		generic_handle_irq(irq);
@@ -284,6 +290,9 @@ static int tegra_pm_irq_syscore_suspend(void)
 #endif
 
 	write_pmc_wake_level(wake_level);
+#ifdef CONFIG_MACH_X3
+	write_pmc_wake_level(wake_level); /* Do it twice */
+#endif
 
 	write_pmc_wake_mask(wake_enb);
 

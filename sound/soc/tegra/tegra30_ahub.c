@@ -34,6 +34,10 @@
 #include <sound/soc.h>
 #include "tegra30_ahub.h"
 
+#ifdef CONFIG_MACH_X3
+#include <linux/delay.h>
+#endif
+
 #define DRV_NAME "tegra30-ahub"
 
 static struct tegra30_ahub *ahub;
@@ -44,6 +48,10 @@ static inline void tegra30_apbif_write(u32 reg, u32 val)
 	ahub->apbif_reg_cache[reg >> 2] = val;
 #endif
 	__raw_writel(val, ahub->apbif_regs + reg);
+
+#ifdef CONFIG_MACH_X3
+	udelay(5);
+#endif
 }
 
 static inline u32 tegra30_apbif_read(u32 reg)

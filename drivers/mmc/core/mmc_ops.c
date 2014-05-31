@@ -9,8 +9,8 @@
  * your option) any later version.
  */
 
-#include <linux/slab.h>
 #include <linux/export.h>
+#include <linux/slab.h>
 #include <linux/types.h>
 #include <linux/scatterlist.h>
 
@@ -234,7 +234,7 @@ static int
 mmc_send_cxd_data(struct mmc_card *card, struct mmc_host *host,
 		u32 opcode, void *buf, unsigned len)
 {
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
 	struct scatterlist sg;
@@ -335,7 +335,6 @@ int mmc_send_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	return mmc_send_cxd_data(card, card->host, MMC_SEND_EXT_CSD,
 			ext_csd, 512);
 }
-EXPORT_SYMBOL_GPL(mmc_send_ext_csd);
 
 int mmc_spi_read_ocr(struct mmc_host *host, int highcap, u32 *ocrp)
 {
@@ -416,7 +415,7 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
 			return -EBADMSG;
 	} else {
 		if (status & 0xFDFFA000)
-			pr_warning("%s: unexpected status %#x after "
+			printk(KERN_WARNING "%s: unexpected status %#x after "
 			       "switch", mmc_hostname(card->host), status);
 		if (status & R1_SWITCH_ERROR)
 			return -EBADMSG;
@@ -456,7 +455,7 @@ static int
 mmc_send_bus_test(struct mmc_card *card, struct mmc_host *host, u8 opcode,
 		  u8 len)
 {
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
 	struct scatterlist sg;
@@ -478,7 +477,7 @@ mmc_send_bus_test(struct mmc_card *card, struct mmc_host *host, u8 opcode,
 	else if (len == 4)
 		test_buf = testdata_4bit;
 	else {
-		pr_err("%s: Invalid bus_width %d\n",
+		printk(KERN_ERR "%s: Invalid bus_width %d\n",
 		       mmc_hostname(host), len);
 		kfree(data_buf);
 		return -EINVAL;
@@ -554,23 +553,15 @@ int mmc_send_hpi_cmd(struct mmc_card *card, u32 *status)
 {
 	struct mmc_command cmd = {0};
 	unsigned int opcode;
+	unsigned int flags;
 	int err;
 
-	if (!card->ext_csd.hpi) {
-		pr_warning("%s: Card didn't support HPI command\n",
-			   mmc_hostname(card->host));
-		return -EINVAL;
-	}
-
 	opcode = card->ext_csd.hpi_cmd;
-	if (opcode == MMC_STOP_TRANSMISSION)
-		cmd.flags = MMC_RSP_R1B | MMC_CMD_AC;
-	else if (opcode == MMC_SEND_STATUS)
-		cmd.flags = MMC_RSP_R1 | MMC_CMD_AC;
+	flags = MMC_RSP_R1 | MMC_CMD_AC;
 
 	cmd.opcode = opcode;
 	cmd.arg = card->rca << 16 | 1;
-	cmd.cmd_timeout_ms = card->ext_csd.out_of_int_time;
+	cmd.flags = flags;
 
 	err = mmc_wait_for_cmd(card->host, &cmd, 0);
 	if (err) {
@@ -624,69 +615,6 @@ int mmc_send_bk_ops_cmd(struct mmc_card *card, bool is_synchronous)
 			   "switch", mmc_hostname(card->host), status);
 	if (status & R1_SWITCH_ERROR)
 		return -EBADMSG;
-
-	return 0;
-}
-
-int mmc_gen_cmd(struct mmc_card *card, void *buf, u8 index, u8 arg1, u8 arg2, u8 mode)
-{
-	struct mmc_request mrq;
-	struct mmc_command cmd;
-	struct mmc_data data;
-	struct mmc_command stop;
-	struct scatterlist sg;
-	void *data_buf;
-
-	mmc_set_blocklen(card, 512);
-
-	data_buf = kmalloc(512, GFP_KERNEL);
-	if (data_buf == NULL)
-		return -ENOMEM;
-
-	memset(&mrq, 0, sizeof(struct mmc_request));
-	memset(&cmd, 0, sizeof(struct mmc_command));
-	memset(&data, 0, sizeof(struct mmc_data));
-	memset(&stop, 0, sizeof(struct mmc_command));
-
-	mrq.cmd = &cmd;
-	mrq.data = &data;
-	mrq.stop = &stop;
-
-	cmd.opcode = MMC_GEN_CMD;
-	cmd.arg = (arg2 << 16) |
-		  (arg1 << 8) |
-		  (index << 1) |
-		  mode;
-
-	cmd.flags = MMC_RSP_SPI_R1 | MMC_RSP_R1 | MMC_CMD_ADTC;
-
-	data.blksz = 512;
-	data.blocks = 1;
-	data.flags = MMC_DATA_READ;
-	data.sg = &sg;
-	data.sg_len = 1;
-
-	stop.opcode = MMC_STOP_TRANSMISSION;
-	stop.arg = 0;
-	stop.flags = MMC_RSP_SPI_R1B | MMC_RSP_R1B | MMC_CMD_AC;
-
-	sg_init_one(&sg, data_buf, 512);
-
-	mmc_set_data_timeout(&data, card);
-
-	mmc_claim_host(card->host);
-	mmc_wait_for_req(card->host, &mrq);
-	mmc_release_host(card->host);
-
-	memcpy(buf, data_buf, 512);
-	kfree(data_buf);
-
-	if (cmd.error)
-		return cmd.error;
-	if (data.error)
-		return data.error;
-	if (stop.error)
-		return stop.error;
 
 	return 0;
 }

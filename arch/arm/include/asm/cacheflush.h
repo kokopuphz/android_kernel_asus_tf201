@@ -117,6 +117,9 @@ struct cpu_cache_fns {
 	void (*dma_unmap_area)(const void *, size_t, int);
 
 	void (*dma_flush_range)(const void *, const void *);
+/* EternityProject: Add invalidate and clean for dma */
+	void (*dma_inv_range)(const void *, const void *);
+	void (*dma_clean_range)(const void *, const void *);
 };
 
 /*
@@ -144,6 +147,10 @@ extern struct cpu_cache_fns cpu_cache;
 #define dmac_map_area			cpu_cache.dma_map_area
 #define dmac_unmap_area			cpu_cache.dma_unmap_area
 #define dmac_flush_range		cpu_cache.dma_flush_range
+
+/* EternityProject: Add invalidate and clean for dma */
+#define dmac_inv_range			cpu_cache.dma_inv_range
+#define dmac_clean_range		cpu_cache.dma_clean_range
 
 #else
 
@@ -412,7 +419,5 @@ int set_pages_array_uc(struct page **pages, int addrinarray);
 int set_pages_array_wc(struct page **pages, int addrinarray);
 int set_pages_array_wb(struct page **pages, int addrinarray);
 int set_pages_array_iwb(struct page **pages, int addrinarray);
-
-extern size_t cache_maint_inner_threshold;
 
 #endif

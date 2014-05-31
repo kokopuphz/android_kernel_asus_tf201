@@ -422,9 +422,6 @@ void cpu_idle(void)
 		while (!need_resched()) {
 			rmb();
 
-			if (cpu_is_offline(smp_processor_id()))
-				play_dead();
-
 			/*
 			 * Idle routines should keep interrupts disabled
 			 * from here on, until they go to idle.
@@ -457,6 +454,8 @@ void cpu_idle(void)
 		preempt_enable_no_resched();
 		schedule();
 		preempt_disable();
+		if (cpu_is_offline(smp_processor_id()))
+			play_dead();
 	}
 }
 

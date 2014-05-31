@@ -1,18 +1,6 @@
 #ifndef __LINUX_MFD_TPS6586X_H
 #define __LINUX_MFD_TPS6586X_H
 
-#define TPS6586X_SLEW_RATE_INSTANTLY	0x00
-#define TPS6586X_SLEW_RATE_110UV	0x01
-#define TPS6586X_SLEW_RATE_220UV	0x02
-#define TPS6586X_SLEW_RATE_440UV	0x03
-#define TPS6586X_SLEW_RATE_880UV	0x04
-#define TPS6586X_SLEW_RATE_1760UV	0x05
-#define TPS6586X_SLEW_RATE_3520UV	0x06
-#define TPS6586X_SLEW_RATE_7040UV	0x07
-
-#define TPS6586X_SLEW_RATE_SET		0x08
-#define TPS6586X_SLEW_RATE_MASK         0x07
-
 #define SM0_PWM_BIT 0
 #define SM1_PWM_BIT 1
 #define SM2_PWM_BIT 2
@@ -67,13 +55,27 @@ enum {
 enum pwm_pfm_mode {
 	PWM_ONLY,
 	AUTO_PWM_PFM,
-	PWM_DEFAULT_VALUE
+	PWM_DEFAULT_VALUE,
+
+};
+
+enum slew_rate_settings {
+	SLEW_RATE_INSTANTLY = 0,
+	SLEW_RATE_0110UV_PER_SEC = 0x1,
+	SLEW_RATE_0220UV_PER_SEC = 0x2,
+	SLEW_RATE_0440UV_PER_SEC = 0x3,
+	SLEW_RATE_0880UV_PER_SEC = 0x4,
+	SLEW_RATE_1760UV_PER_SEC = 0x5,
+	SLEW_RATE_3520UV_PER_SEC = 0x6,
+	SLEW_RATE_7040UV_PER_SEC = 0x7,
+	SLEW_RATE_DEFAULT_VALUE,
 };
 
 struct tps6586x_settings {
-	int slew_rate;
 	/* SM0, SM1 and SM2 have PWM-only and auto PWM/PFM mode */
 	enum pwm_pfm_mode sm_pwm_mode;
+	/* SM0 and SM1 have slew rate settings */
+	enum slew_rate_settings slew_rate;
 };
 
 enum {
@@ -110,8 +112,6 @@ struct tps6586x_platform_data {
 
 	int gpio_base;
 	int irq_base;
-
-	bool use_power_off;
 };
 
 /*
@@ -126,5 +126,6 @@ extern int tps6586x_set_bits(struct device *dev, int reg, uint8_t bit_mask);
 extern int tps6586x_clr_bits(struct device *dev, int reg, uint8_t bit_mask);
 extern int tps6586x_update(struct device *dev, int reg, uint8_t val,
 			   uint8_t mask);
+extern int tps6586x_power_off(void);
 
 #endif /*__LINUX_MFD_TPS6586X_H */

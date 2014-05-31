@@ -18,7 +18,6 @@
 struct sdhci_pltfm_data {
 	struct sdhci_ops *ops;
 	u64 quirks;
-	u32 quirks2;
 };
 
 struct sdhci_pltfm_host {
@@ -100,10 +99,8 @@ extern int sdhci_pltfm_register(struct platform_device *pdev,
 extern int sdhci_pltfm_unregister(struct platform_device *pdev);
 
 #ifdef CONFIG_PM
-extern const struct dev_pm_ops sdhci_pltfm_pmops;
-#define SDHCI_PLTFM_PMOPS (&sdhci_pltfm_pmops)
-#else
-#define SDHCI_PLTFM_PMOPS NULL
+extern int sdhci_pltfm_suspend(struct platform_device *dev, pm_message_t state);
+extern int sdhci_pltfm_resume(struct platform_device *dev);
 #endif
 
 #endif /* _DRIVERS_MMC_SDHCI_PLTFM_H */

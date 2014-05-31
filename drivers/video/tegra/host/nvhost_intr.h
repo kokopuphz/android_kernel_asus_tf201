@@ -24,7 +24,6 @@
 #include <linux/kthread.h>
 #include <linux/semaphore.h>
 #include <linux/interrupt.h>
-#include <linux/workqueue.h>
 
 struct nvhost_channel;
 
@@ -59,13 +58,13 @@ enum nvhost_intr_action {
 struct nvhost_intr;
 
 struct nvhost_intr_syncpt {
-	struct nvhost_intr *intr;
+	struct  nvhost_intr *intr;
 	u8 id;
+	u8 irq_requested;
 	u16 irq;
 	spinlock_t lock;
 	struct list_head wait_head;
 	char thresh_irq_name[12];
-	struct work_struct work;
 };
 
 struct nvhost_intr {
@@ -73,10 +72,7 @@ struct nvhost_intr {
 	struct mutex mutex;
 	int host_general_irq;
 	int host_syncpt_irq_base;
-	struct workqueue_struct *wq;
-	void (*generic_isr[BITS_PER_LONG])(void);
-	void (*generic_isr_thread[BITS_PER_LONG])(void);
-	u32 intstatus;
+	bool host_general_irq_requested;
 };
 #define intr_to_dev(x) container_of(x, struct nvhost_master, intr)
 #define intr_syncpt_to_intr(is) (is->intr)
@@ -108,7 +104,7 @@ void *nvhost_intr_alloc_waiter(void);
  * You must call this if you passed non-NULL as ref.
  * @ref the ref returned from nvhost_intr_add_action()
  */
-void nvhost_intr_put_ref(struct nvhost_intr *intr, u32 id, void *ref);
+void nvhost_intr_put_ref(struct nvhost_intr *intr, void *ref);
 
 int nvhost_intr_init(struct nvhost_intr *intr, u32 irq_gen, u32 irq_sync);
 void nvhost_intr_deinit(struct nvhost_intr *intr);
@@ -116,10 +112,4 @@ void nvhost_intr_start(struct nvhost_intr *intr, u32 hz);
 void nvhost_intr_stop(struct nvhost_intr *intr);
 
 irqreturn_t nvhost_syncpt_thresh_fn(int irq, void *dev_id);
-irqreturn_t nvhost_intr_irq_fn(int irq, void *dev_id);
-
-void nvhost_intr_enable_general_irq(struct nvhost_intr *intr, int irq,
-	void (*generic_isr)(void), void (*generic_isr_thread));
-void nvhost_intr_disable_general_irq(struct nvhost_intr *intr, int irq);
-
 #endif

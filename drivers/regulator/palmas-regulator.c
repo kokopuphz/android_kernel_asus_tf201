@@ -2,7 +2,6 @@
  * Driver for Regulator part of Palmas PMIC Chips
  *
  * Copyright 2011-2012 Texas Instruments Inc.
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
  *
  * Author: Graeme Gregory <gg@slimlogic.co.uk>
  *
@@ -206,11 +205,6 @@ static unsigned int palmas_smps_ramp_delay[4] = {0, 10000, 5000, 2500};
 #define SMPS_CTRL_MODE_ECO		0x02
 #define SMPS_CTRL_MODE_PWM		0x03
 
-#define SMPS_CTRL_SLEEP_MODE_OFF	0x00
-#define SMPS_CTRL_SLEEP_MODE_ON		0x04
-#define SMPS_CTRL_SLEEP_MODE_ECO	0x08
-#define SMPS_CTRL_SLEEP_MODE_PWM	0x0C
-
 /* These values are derived from the data sheet. And are the number of steps
  * where there is a voltage change, the ranges at beginning and end of register
  * max/min values where there are no change are ommitted.
@@ -311,10 +305,7 @@ static int palmas_enable_smps(struct regulator_dev *dev)
 	palmas_smps_read(pmic->palmas, palmas_regs_info[id].ctrl_addr, &reg);
 
 	reg &= ~PALMAS_SMPS12_CTRL_MODE_ACTIVE_MASK;
-	if (pmic->current_mode_reg[id])
-		reg |= pmic->current_mode_reg[id];
-	else
-		reg |= SMPS_CTRL_MODE_ON;
+	reg |= SMPS_CTRL_MODE_ON;
 
 	palmas_smps_write(pmic->palmas, palmas_regs_info[id].ctrl_addr, reg);
 
@@ -336,18 +327,15 @@ static int palmas_disable_smps(struct regulator_dev *dev)
 	return 0;
 }
 
+
 static int palmas_set_mode_smps(struct regulator_dev *dev, unsigned int mode)
 {
 	struct palmas_pmic *pmic = rdev_get_drvdata(dev);
 	int id = rdev_get_id(dev);
 	unsigned int reg;
-	int avoid_update = 0;
 
 	palmas_smps_read(pmic->palmas, palmas_regs_info[id].ctrl_addr, &reg);
 	reg &= ~PALMAS_SMPS12_CTRL_MODE_ACTIVE_MASK;
-
-	if (reg == SMPS_CTRL_MODE_OFF)
-		avoid_update = 1;
 
 	switch (mode) {
 	case REGULATOR_MODE_NORMAL:
@@ -359,16 +347,11 @@ static int palmas_set_mode_smps(struct regulator_dev *dev, unsigned int mode)
 	case REGULATOR_MODE_FAST:
 		reg |= SMPS_CTRL_MODE_PWM;
 		break;
-	case REGULATOR_MODE_STANDBY:
-		reg |= SMPS_CTRL_MODE_OFF;
-		break;
 	default:
 		return -EINVAL;
 	}
-	pmic->current_mode_reg[id] = reg & PALMAS_SMPS12_CTRL_MODE_ACTIVE_MASK;
-	if (!avoid_update)
-		palmas_smps_write(pmic->palmas,
-			palmas_regs_info[id].ctrl_addr, reg);
+	palmas_smps_write(pmic->palmas, palmas_regs_info[id].ctrl_addr, reg);
+
 	return 0;
 }
 
@@ -378,7 +361,9 @@ static unsigned int palmas_get_mode_smps(struct regulator_dev *dev)
 	int id = rdev_get_id(dev);
 	unsigned int reg;
 
-	reg = pmic->current_mode_reg[id] & PALMAS_SMPS12_CTRL_MODE_ACTIVE_MASK;
+	palmas_smps_read(pmic->palmas, palmas_regs_info[id].ctrl_addr, &reg);
+	reg &= PALMAS_SMPS12_CTRL_STATUS_MASK;
+	reg >>= PALMAS_SMPS12_CTRL_STATUS_SHIFT;
 
 	switch (reg) {
 	case SMPS_CTRL_MODE_ON:
@@ -387,47 +372,8 @@ static unsigned int palmas_get_mode_smps(struct regulator_dev *dev)
 		return REGULATOR_MODE_IDLE;
 	case SMPS_CTRL_MODE_PWM:
 		return REGULATOR_MODE_FAST;
-	case SMPS_CTRL_MODE_OFF:
-		return REGULATOR_MODE_STANDBY;
 	}
 
-	return 0;
-}
-
-static int palmas_set_sleep_mode_smps(struct regulator_dev *dev,
-	unsigned int mode)
-{
-	struct palmas_pmic *pmic = rdev_get_drvdata(dev);
-	int id = rdev_get_id(dev);
-	unsigned int reg;
-	int avoid_update = 0;
-
-	palmas_smps_read(pmic->palmas, palmas_regs_info[id].ctrl_addr, &reg);
-	reg &= ~PALMAS_SMPS12_CTRL_MODE_SLEEP_MASK;
-
-	if (reg == SMPS_CTRL_MODE_OFF)
-		avoid_update = 1;
-
-	switch (mode) {
-	case REGULATOR_MODE_NORMAL:
-		reg |= SMPS_CTRL_SLEEP_MODE_ON;
-		break;
-	case REGULATOR_MODE_IDLE:
-		reg |= SMPS_CTRL_SLEEP_MODE_ECO;
-		break;
-	case REGULATOR_MODE_FAST:
-		reg |= SMPS_CTRL_SLEEP_MODE_PWM;
-		break;
-	case REGULATOR_MODE_STANDBY:
-	case REGULATOR_MODE_OFF:
-		reg |= SMPS_CTRL_SLEEP_MODE_OFF;
-		break;
-	default:
-		return -EINVAL;
-	}
-	if (!avoid_update)
-		palmas_smps_write(pmic->palmas,
-			palmas_regs_info[id].ctrl_addr, reg);
 	return 0;
 }
 
@@ -562,7 +508,6 @@ static struct regulator_ops palmas_ops_smps = {
 	.disable		= palmas_disable_smps,
 	.set_mode		= palmas_set_mode_smps,
 	.get_mode		= palmas_get_mode_smps,
-	.set_sleep_mode		= palmas_set_sleep_mode_smps,
 	.get_voltage_sel	= palmas_get_voltage_smps_sel,
 	.set_voltage_sel	= palmas_set_voltage_smps_sel,
 	.list_voltage		= palmas_list_voltage_smps,
@@ -1273,59 +1218,6 @@ err:
 	return;
 }
 
-
-static ssize_t auto_smps45_ctrl_set(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int reg_val, ret_val;
-	long set_val;
-	struct palmas *palmas = dev_get_drvdata(dev->parent);
-	ret_val = palmas_smps_read(palmas, PALMAS_SMPS_CTRL, &reg_val);
-
-	if (ret_val < 0) {
-		dev_err(dev, "Not able to read registers\n");
-		goto out;
-	}
-
-	if (kstrtol(buf, 10, &set_val)) {
-		ret_val = -EINVAL;
-		goto out;
-	}
-
-	set_val = set_val > 0 ? 0x2 : 0;
-	reg_val = reg_val & (~PALMAS_SMPS_CTRL_SMPS45_PHASE_CTRL_MASK);
-	if (set_val) {
-		reg_val = reg_val |
-		(set_val << PALMAS_SMPS_CTRL_SMPS45_PHASE_CTRL_SHIFT);
-	}
-	ret_val = palmas_smps_write(palmas, PALMAS_SMPS_CTRL, reg_val);
-	if (ret_val < 0) {
-		dev_err(dev, "Not able to write palmas register\n");
-		goto out;
-	}
-	ret_val = count;
-out:
-	return ret_val;
-}
-
-static ssize_t auto_smps45_ctrl_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	unsigned int reg_val, ret_val;
-	struct palmas *palmas = dev_get_drvdata(dev->parent);
-	ret_val = palmas_smps_read(palmas, PALMAS_SMPS_CTRL, &reg_val);
-	if (ret_val < 0) {
-		dev_err(dev, "Not able to read palmas register");
-		return -EINVAL;
-	}
-	reg_val = (reg_val & PALMAS_SMPS_CTRL_SMPS45_PHASE_CTRL_MASK)
-				>> PALMAS_SMPS_CTRL_SMPS45_PHASE_CTRL_SHIFT;
-	return sprintf(buf, "%d\n", reg_val);
-}
-
-DEVICE_ATTR(auto_smps45_ctrl, 0644, auto_smps45_ctrl_show, \
-						auto_smps45_ctrl_set);
-
 static __devinit int palmas_probe(struct platform_device *pdev)
 {
 	struct palmas *palmas = dev_get_drvdata(pdev->dev.parent);
@@ -1445,7 +1337,6 @@ static __devinit int palmas_probe(struct platform_device *pdev)
 		 * read and store the RANGE bit for later use
 		 * This must be done before regulator is probed otherwise
 		 * we error in probe with unsuportable ranges.
-		 * Read the smps mode for later use.
 		 */
 		if (id != PALMAS_REG_SMPS10) {
 			addr = palmas_regs_info[id].vsel_addr;
@@ -1455,14 +1346,6 @@ static __devinit int palmas_probe(struct platform_device *pdev)
 				goto err_unregister_regulator;
 			if (reg & PALMAS_SMPS12_VOLTAGE_RANGE)
 				pmic->range[id] = 1;
-
-			/* Read the smps mode for later use. */
-			addr = palmas_regs_info[id].ctrl_addr;
-			ret = palmas_smps_read(pmic->palmas, addr, &reg);
-			if (ret)
-				goto err_unregister_regulator;
-			pmic->current_mode_reg[id] = reg &
-					PALMAS_SMPS12_CTRL_MODE_ACTIVE_MASK;
 		}
 
 		rdev = regulator_register(&pmic->desc[id],
@@ -1534,12 +1417,6 @@ static __devinit int palmas_probe(struct platform_device *pdev)
 					goto err_unregister_regulator;
 			}
 		}
-	}
-
-	if (device_create_file(&pdev->dev, &dev_attr_auto_smps45_ctrl)) {
-		dev_err(&pdev->dev, "failed to create sysfs\n");
-		ret = -ENOMEM;
-		goto err_unregister_regulator;
 	}
 
 	/* Check if LDO8 is in tracking mode or not */

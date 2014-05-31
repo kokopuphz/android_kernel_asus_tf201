@@ -54,6 +54,12 @@
 #include <asm/io.h>
 #include <asm/unistd.h>
 
+#ifdef CONFIG_MACH_X3 /* EPRJ: Implies MFD_MAX77663 */
+#include "../arch/arm/mach-tegra/eprj_x3/include/lge/board-x3-nv.h"
+#include "../arch/arm/mach-tegra/board.h"
+#include <linux/mfd/max77663-core.h>
+#endif
+
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a,b)	(-EINVAL)
 #endif
@@ -316,7 +322,14 @@ EXPORT_SYMBOL_GPL(emergency_restart);
 
 void kernel_restart_prepare(char *cmd)
 {
+#ifdef CONFIG_MACH_X3
+#define MAX77663_SCRATCH_REG_RESERVE_0 (1<<0)
+	max77663_set_ScratchRegister(MAX77663_SCRATCH_REG_RESERVE_0);
 	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
+	max77663_power_rst_wkup(1);
+#else
+	blocking_notifier_call_chain(&reboot_notifier_list, SYS_RESTART, cmd);
+#endif
 	system_state = SYSTEM_RESTART;
 	usermodehelper_disable();
 	device_shutdown();
@@ -365,6 +378,7 @@ EXPORT_SYMBOL(unregister_reboot_notifier);
 void kernel_restart(char *cmd)
 {
 	kernel_restart_prepare(cmd);
+	disable_nonboot_cpus();
 	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
 	else
@@ -389,6 +403,9 @@ static void kernel_shutdown_prepare(enum system_states state)
  */
 void kernel_halt(void)
 {
+#ifdef CONFIG_MACH_X3
+	blocking_notifier_call_chain(&reboot_notifier_list,SYS_POWER_OFF, NULL);
+#endif
 	kernel_shutdown_prepare(SYSTEM_HALT);
 	syscore_shutdown();
 	printk(KERN_EMERG "System halted.\n");
@@ -1179,15 +1196,16 @@ DECLARE_RWSEM(uts_sem);
  * Work around broken programs that cannot handle "Linux 3.0".
  * Instead we map 3.x to 2.6.40+x, so e.g. 3.0 would be 2.6.40
  */
-static int override_release(char __user *release, int len)
+static int override_release(char __user *release, size_t len)
 {
 	int ret = 0;
-	char buf[65];
 
 	if (current->personality & UNAME26) {
-		char *rest = UTS_RELEASE;
+		const char *rest = UTS_RELEASE;
+		char buf[65] = { 0 };
 		int ndots = 0;
 		unsigned v;
+		size_t copy;
 
 		while (*rest) {
 			if (*rest == '.' && ++ndots >= 3)
@@ -1197,8 +1215,9 @@ static int override_release(char __user *release, int len)
 			rest++;
 		}
 		v = ((LINUX_VERSION_CODE >> 8) & 0xff) + 40;
-		snprintf(buf, len, "2.6.%u%s", v, rest);
-		ret = copy_to_user(release, buf, len);
+		copy = clamp_t(size_t, len, 1, sizeof(buf));
+		copy = scnprintf(buf, copy, "2.6.%u%s", v, rest);
+		ret = copy_to_user(release, buf, copy + 1);
 	}
 	return ret;
 }

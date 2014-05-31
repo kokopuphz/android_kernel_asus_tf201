@@ -15,6 +15,7 @@
 #include <linux/workqueue.h>
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
+#include <linux/wakelock.h>
 
 #include "power.h"
 
@@ -272,7 +273,11 @@ static ssize_t state_show(struct kobject *kobj, struct kobj_attribute *attr,
 static suspend_state_t decode_state(const char *buf, size_t n)
 {
 #ifdef CONFIG_SUSPEND
+#ifdef CONFIG_EARLYSUSPEND
+	suspend_state_t state = PM_SUSPEND_ON;
+#else
 	suspend_state_t state = PM_SUSPEND_STANDBY;
+#endif
 	const char * const *s;
 #endif
 	char *p;
@@ -310,8 +315,17 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 	}
 
 	state = decode_state(buf, n);
-	if (state < PM_SUSPEND_MAX)
+
+	if (state < PM_SUSPEND_MAX) {
+#ifdef CONFIG_EARLYSUSPEND
+		if (state == PM_SUSPEND_ON || valid_state(state)) {
+			error = 0;
+			request_suspend_state(state);
+		}
+#else
 		error = pm_suspend(state);
+#endif
+	}
 	else if (state == PM_SUSPEND_MAX)
 		error = hibernate();
 	else
@@ -470,6 +484,88 @@ power_attr(wake_unlock);
 #endif /* CONFIG_PM_WAKELOCKS */
 #endif /* CONFIG_PM_SLEEP */
 
+#ifdef CONFIG_MACH_ENDEAVORU
+static ssize_t state_onchg_show(struct kobject *kobj, struct kobj_attribute *attr,
+			     char *buf)
+{
+	char *s = buf;
+	s += sprintf(s, "chgoff ");
+	if (s != buf)
+		/* convert the last space to a newline */
+		*(s-1) = '\n';
+
+	return (s - buf);
+}
+
+static ssize_t
+state_onchg_store(struct kobject *kobj, struct kobj_attribute *attr,
+	       const char *buf, size_t n)
+{
+	return 0;
+}
+power_attr(state_onchg);
+
+static ssize_t
+launch_event_show(struct kobject *kobj, struct kobj_attribute *attr,
+                char *buf)
+{
+        return 0;
+}
+
+static ssize_t
+launch_event_store(struct kobject *kobj, struct kobj_attribute *attr,
+                const char *buf, size_t n)
+{
+	return 0;
+}
+power_attr(launch_event);
+
+static ssize_t
+launch_activity_show(struct kobject *kobj, struct kobj_attribute *attr,
+                char *buf)
+{
+	return 0;
+}
+
+static ssize_t
+launch_activity_store(struct kobject *kobj, struct kobj_attribute *attr,
+                const char *buf, size_t n)
+{
+	return 0;
+}
+power_attr(launch_activity);
+
+static ssize_t
+cpunum_floor_show(struct kobject *kobj, struct kobj_attribute *attr,
+               char *buf)
+{
+	return 0;
+}
+
+static ssize_t
+cpunum_floor_store(struct kobject *kobj, struct kobj_attribute *attr,
+               const char *buf, size_t n)
+{
+	return 0;
+}
+power_attr(cpunum_floor);
+
+static ssize_t
+cpunum_ceiling_show(struct kobject *kobj, struct kobj_attribute *attr,
+               char *buf)
+{
+	return 0;
+}
+
+static ssize_t
+cpunum_ceiling_store(struct kobject *kobj, struct kobj_attribute *attr,
+               const char *buf, size_t n)
+{
+	return 0;
+}
+power_attr(cpunum_ceiling);
+#endif
+
 #ifdef CONFIG_PM_TRACE
 int pm_trace_enabled;
 
@@ -512,6 +608,11 @@ power_attr(pm_trace_dev_match);
 
 #endif /* CONFIG_PM_TRACE */
 
+#ifdef CONFIG_USER_WAKELOCK
+power_attr(wake_lock);
+power_attr(wake_unlock);
+#endif
+
 static struct attribute * g[] = {
 	&state_attr.attr,
 #ifdef CONFIG_PM_TRACE
@@ -531,6 +632,17 @@ static struct attribute * g[] = {
 #ifdef CONFIG_PM_DEBUG
 	&pm_test_attr.attr,
 #endif
+#ifdef CONFIG_USER_WAKELOCK
+	&wake_lock_attr.attr,
+	&wake_unlock_attr.attr,
+#endif
+#endif
+#ifdef CONFIG_MACH_ENDEAVORU
+	&state_onchg_attr.attr,
+	&launch_event_attr.attr,
+	&launch_activity_attr.attr,
+	&cpunum_floor_attr.attr,
+	&cpunum_ceiling_attr.attr,
 #endif
 	NULL,
 };

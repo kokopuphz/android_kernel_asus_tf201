@@ -1658,7 +1658,11 @@ static int autosuspend_check(struct usb_device *udev)
 		}
 	}
 	if (w && !device_can_wakeup(&udev->dev)) {
+		struct device_driver *thedev = udev->dev.driver;
 		dev_dbg(&udev->dev, "remote wakeup needed for autosuspend\n");
+		pr_err("EPRJ: init_name: %s - struct device_driver name: %s",
+				udev->dev.init_name, thedev->name);
+		pr_err("EPRJ: init_name: %s\n", udev->dev.init_name);
 		return -EOPNOTSUPP;
 	}
 	udev->do_remote_wakeup = w;

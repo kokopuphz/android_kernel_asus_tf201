@@ -6,7 +6,7 @@
  * Author:
  *	Colin Cross <ccross@google.com>
  *
- * Copyright (c) 2010-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2010-2013, NVIDIA Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -151,7 +151,6 @@ struct clk {
 	struct clk_ops		*ops;
 	unsigned long		dvfs_rate;
 	unsigned long		rate;
-	unsigned long		boot_rate;
 	unsigned long		max_rate;
 	unsigned long		min_rate;
 	bool			auto_dvfs;
@@ -178,9 +177,6 @@ struct clk {
 			unsigned int			clk_num;
 			u32				src_mask;
 			u32				src_shift;
-			struct clk			*pll_low;
-			struct clk			*pll_high;
-			unsigned long			threshold;
 		} periph;
 		struct {
 			unsigned long			input_min;
@@ -269,7 +265,6 @@ void tegra11x_init_clocks(void);
 void tegra11x_clk_init_la(void);
 void tegra_common_init_clock(void);
 void tegra_init_max_rate(struct clk *c, unsigned long max_rate);
-void tegra_clk_preset_emc_monitor(unsigned long rate);
 void tegra_clk_vefify_parents(void);
 void clk_init(struct clk *clk);
 struct clk *tegra_get_clock_by_name(const char *name);
@@ -364,7 +359,9 @@ struct tegra_cpufreq_table_data {
 	struct cpufreq_frequency_table *freq_table;
 	int throttle_lowest_index;
 	int throttle_highest_index;
+#ifndef CONFIG_EPRJ_CPUMANAGER
 	int suspend_index;
+#endif
 };
 struct tegra_cpufreq_table_data *tegra_cpufreq_table_get(void);
 unsigned long tegra_emc_to_cpu_ratio(unsigned long cpu_rate);

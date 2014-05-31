@@ -75,9 +75,9 @@ static u32 t20_syncpt_update_min(struct nvhost_syncpt *sp, u32 id)
 		dev_err(&syncpt_to_dev(sp)->dev->dev,
 				"%s failed: id=%u, min=%d, max=%d\n",
 				__func__,
-				id,
 				nvhost_syncpt_read_min(sp, id),
-				nvhost_syncpt_read_max(sp, id));
+				nvhost_syncpt_read_max(sp, id),
+				id);
 
 	return live;
 }
@@ -119,12 +119,7 @@ static int host1x_syncpt_patch_wait(struct nvhost_syncpt *sp,
 static const char *t20_syncpt_name(struct nvhost_syncpt *sp, u32 id)
 {
 	struct host1x_device_info *info = &syncpt_to_dev(sp)->info;
-	const char *name = NULL;
-
-	if (id < info->nb_pts)
-		name = info->syncpt_names[id];
-
-	return name ? name : "";
+	return (id >= info->nb_pts) ? NULL : info->syncpt_names[id];
 }
 
 static void t20_syncpt_debug(struct nvhost_syncpt *sp)

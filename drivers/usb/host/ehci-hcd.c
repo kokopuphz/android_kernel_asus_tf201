@@ -832,12 +832,12 @@ static int __maybe_unused ehci_setup (struct usb_hcd *hcd)
 
 	ehci->sbrn = HCD_USB2;
 
-	retval = ehci_halt(ehci);
+	/* data structure init */
+	retval = ehci_init(hcd);
 	if (retval)
 		return retval;
 
-	/* data structure init */
-	retval = ehci_init(hcd);
+	retval = ehci_halt(ehci);
 	if (retval)
 		return retval;
 
@@ -953,6 +953,7 @@ static irqreturn_t ehci_irq (struct usb_hcd *hcd)
 			 */
 			ehci->reset_done[i] = jiffies + msecs_to_jiffies(25);
 			ehci_dbg (ehci, "port %d remote wakeup\n", i + 1);
+			usb_hcd_start_port_resume(&hcd->self, i);
 			mod_timer(&hcd->rh_timer, ehci->reset_done[i]);
 #ifdef CONFIG_USB_EHCI_TEGRA
 			ehci->controller_remote_wakeup = true;

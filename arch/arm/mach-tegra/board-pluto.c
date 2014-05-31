@@ -629,7 +629,6 @@ static struct tegra_usb_platform_data tegra_udc_pdata = {
 	.port_otg = true,
 	.has_hostpc = true,
 	.builtin_host_disabled = true,
-	.unaligned_dma_buf_supported = false,
 	.phy_intf = TEGRA_USB_PHY_INTF_UTMI,
 	.op_mode = TEGRA_USB_OPMODE_DEVICE,
 	.u_data.dev = {
@@ -992,14 +991,12 @@ static void pluto_modem_init(void)
 
 	switch (modem_id) {
 	case TEGRA_BB_I500: /* on board i500 HSIC */
-		if (!(usb_port_owner_info & HSIC1_PORT_OWNER_XUSB)) {
+		if (!(usb_port_owner_info & HSIC1_PORT_OWNER_XUSB))
 			platform_device_register(&icera_baseband_device);
-		}
 		break;
 	case TEGRA_BB_I500SWD: /* i500 SWD HSIC */
-		if (!(usb_port_owner_info & HSIC2_PORT_OWNER_XUSB)) {
+		if (!(usb_port_owner_info & HSIC2_PORT_OWNER_XUSB))
 			platform_device_register(&icera_baseband2_device);
-		}
 		break;
 #ifdef CONFIG_TEGRA_BB_OEM1
 	case TEGRA_BB_OEM1:	/* OEM1 HSIC */

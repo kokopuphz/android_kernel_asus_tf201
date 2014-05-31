@@ -34,16 +34,17 @@ int nvhost_channel_init(struct nvhost_channel *ch,
 		struct nvhost_master *dev, int index)
 {
 	int err;
-	struct nvhost_device_data *pdata = platform_get_drvdata(ch->dev);
+	struct nvhost_device *ndev;
 
-	/* Link platform_device to nvhost_channel */
+	/* Link nvhost_device to nvhost_channel */
 	err = channel_op().init(ch, dev, index);
 	if (err < 0) {
 		dev_err(&dev->dev->dev, "failed to init channel %d\n",
 				index);
 		return err;
 	}
-	pdata->channel = ch;
+	ndev = ch->dev;
+	ndev->channel = ch;
 
 	return 0;
 }
@@ -79,14 +80,14 @@ int nvhost_channel_submit(struct nvhost_job *job)
 struct nvhost_channel *nvhost_getchannel(struct nvhost_channel *ch)
 {
 	int err = 0;
-	struct nvhost_device_data *pdata = platform_get_drvdata(ch->dev);
+	struct nvhost_driver *drv = to_nvhost_driver(ch->dev->dev.driver);
 
 	mutex_lock(&ch->reflock);
 	if (ch->refcount == 0) {
-		if (pdata->init)
-			pdata->init(ch->dev);
+		if (drv->init)
+			drv->init(ch->dev);
 		err = nvhost_cdma_init(&ch->cdma);
-	} else if (pdata->exclusive) {
+	} else if (ch->dev->exclusive) {
 		err = -EBUSY;
 	}
 	if (!err)
@@ -95,7 +96,7 @@ struct nvhost_channel *nvhost_getchannel(struct nvhost_channel *ch)
 	mutex_unlock(&ch->reflock);
 
 	/* Keep alive modules that needs to be when a channel is open */
-	if (!err && pdata->keepalive)
+	if (!err && ch->dev->keepalive)
 		nvhost_module_busy(ch->dev);
 
 	return err ? NULL : ch;
@@ -103,7 +104,6 @@ struct nvhost_channel *nvhost_getchannel(struct nvhost_channel *ch)
 
 void nvhost_putchannel(struct nvhost_channel *ch, struct nvhost_hwctx *ctx)
 {
-	struct nvhost_device_data *pdata = platform_get_drvdata(ch->dev);
 	BUG_ON(!channel_cdma_op().stop);
 
 	if (ctx) {
@@ -114,15 +114,14 @@ void nvhost_putchannel(struct nvhost_channel *ch, struct nvhost_hwctx *ctx)
 	}
 
 	/* Allow keep-alive'd module to be turned off */
-	if (pdata->keepalive)
+	if (ch->dev->keepalive)
 		nvhost_module_idle(ch->dev);
 
 	mutex_lock(&ch->reflock);
 	if (ch->refcount == 1) {
 		channel_cdma_op().stop(&ch->cdma);
 		nvhost_cdma_deinit(&ch->cdma);
-		if (pdata->deinit)
-			pdata->deinit(ch->dev);
+		nvhost_module_suspend(ch->dev);
 	}
 	ch->refcount--;
 	mutex_unlock(&ch->reflock);
@@ -186,15 +185,15 @@ int nvhost_channel_read_reg(struct nvhost_channel *ch,
 	struct nvhost_hwctx *hwctx,
 	u32 offset, u32 *value)
 {
-	struct nvhost_device_data *pdata = platform_get_drvdata(ch->dev);
-	if (!pdata->read_reg)
+	struct nvhost_driver *drv = to_nvhost_driver(ch->dev->dev.driver);
+	if (!drv->read_reg)
 		return -EINVAL;
 
-	return pdata->read_reg(ch->dev, ch, hwctx, offset, value);
+	return drv->read_reg(ch->dev, ch, hwctx, offset, value);
 }
 
 int nvhost_channel_drain_read_fifo(struct nvhost_channel *ch,
-	u32 *ptr, unsigned int count, unsigned int *pending)
+			u32 *ptr, unsigned int count, unsigned int *pending)
 {
 	return channel_op().drain_read_fifo(ch, ptr, count, pending);
 }

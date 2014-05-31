@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -106,7 +106,7 @@ static int tegra_wake_event_irq[] = {
 	INT_RTC,				/* wake16 */
 	INT_KBC,				/* wake17 */
 	INT_EXTERNAL_PMU,			/* wake18 */
-	INT_USB,				/* wake19 */
+	-EINVAL,				/* wake19 */
 	-EINVAL,				/* wake20 */
 	-EINVAL,				/* wake21 */
 	-EINVAL,				/* wake22 */
@@ -126,7 +126,7 @@ static int tegra_wake_event_irq[] = {
 	-EAGAIN,				/* wake36 */
 	-EINVAL, /* TEGRA_USB3_VBUS, */		/* wake37 */
 	-EINVAL, /* TEGRA_USB3_ID, */		/* wake38 */
-	-EINVAL, /* TEGRA_USB1_UTMIP, */	/* wake39 */
+	INT_USB, /* TEGRA_USB1_UTMIP, */	/* wake39 */
 	-EINVAL,				/* wake40 */
 	-EINVAL,				/* wake41 */
 	INT_USB2, /* USB1 UHSIC PHY */		/* wake42 */
@@ -143,33 +143,12 @@ static int tegra_wake_event_irq[] = {
 	INT_I2C3, /* I2C3 CLK */		/* wake53 */
 	-EAGAIN,				/* wake54 */
 	INT_UARTC, /* UART3 CTS */		/* wake55 */
-	-EAGAIN,				/* wake56 */
+	INT_SDMMC3, /* SDMMC3 CD */		/* wake56 */
 	INT_USB, /* TEGRA_USB1_VBUS_EN1, */	/* wake57 */
 	INT_XUSB_PADCTL, /* XUSB superspeed wake */	/* wake58 */
 };
 
 static int last_gpio = -1;
-
-int tegra_set_wake_gpio(unsigned int wake, int gpio)
-{
-	if (wake < 0 || wake >= ARRAY_SIZE(tegra_gpio_wakes))
-		return -EINVAL;
-
-	tegra_wake_event_irq[wake] = -EAGAIN;
-	tegra_gpio_wakes[wake] = gpio;
-
-	return 0;
-}
-
-int tegra_set_wake_irq(unsigned int wake, int irq)
-{
-	if (wake < 0 || wake >= ARRAY_SIZE(tegra_wake_event_irq))
-		return -EINVAL;
-
-	tegra_wake_event_irq[wake] = irq;
-
-	return 0;
-}
 
 int tegra_gpio_to_wake(int gpio)
 {

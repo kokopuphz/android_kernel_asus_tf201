@@ -126,8 +126,7 @@ static int kai_nct1008_init(void)
 	}
 
 	tegra_platform_edp_init(kai_nct1008_pdata.trips,
-				&kai_nct1008_pdata.num_trips,
-				0); /* edp temperature margin */
+				&kai_nct1008_pdata.num_trips);
 
 	return ret;
 }

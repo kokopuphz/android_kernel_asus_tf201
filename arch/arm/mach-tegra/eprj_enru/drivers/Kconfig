@@ -1,0 +1,3 @@
+source "arch/arm/mach-tegra/eprj_enru/drivers/i2c/Kconfig"
+source "arch/arm/mach-tegra/eprj_enru/drivers/ts/Kconfig"
+source "arch/arm/mach-tegra/eprj_enru/drivers/ti-fm/Kconfig"

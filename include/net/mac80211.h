@@ -1,3 +1,7 @@
+#ifdef CONFIG_MACH_ENDEAVORU
+#include <net/mac80211_enru.h>
+#else
+
 /*
  * mac80211 <-> driver interface
  *
@@ -3711,3 +3715,5 @@ int ieee80211_add_srates_ie(struct ieee80211_vif *vif, struct sk_buff *skb);
 int ieee80211_add_ext_srates_ie(struct ieee80211_vif *vif,
 				struct sk_buff *skb);
 #endif /* MAC80211_H */
+
+#endif /* !CONFIG_MACH_ENDEAVORU */

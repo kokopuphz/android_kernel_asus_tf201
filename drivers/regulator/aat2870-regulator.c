@@ -22,7 +22,6 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/err.h>
-#include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
@@ -32,7 +31,7 @@
 #include <linux/mfd/aat2870.h>
 
 struct aat2870_regulator {
-	struct aat2870_data *aat2870;
+	struct platform_device *pdev;
 	struct regulator_desc desc;
 
 	const int *voltages; /* uV */
@@ -57,20 +56,41 @@ static int aat2870_ldo_list_voltage(struct regulator_dev *rdev,
 	return ri->voltages[selector];
 }
 
-static int aat2870_ldo_set_voltage_sel(struct regulator_dev *rdev,
-				       unsigned selector)
+static int aat2870_ldo_set_voltage(struct regulator_dev *rdev,
+				   int min_uV, int max_uV, unsigned *selector)
 {
 	struct aat2870_regulator *ri = rdev_get_drvdata(rdev);
-	struct aat2870_data *aat2870 = ri->aat2870;
+	struct aat2870_data *aat2870 = dev_get_drvdata(ri->pdev->dev.parent);
+	u8 val;
+	int uV;
+	int i;
+
+	if ((min_uV < ri->min_uV) || (max_uV > ri->max_uV)) {
+		dev_err(&rdev->dev,
+			"Invalid voltage, min %duV(>=%duV), max %duV(<=%duV)\n",
+			min_uV, ri->min_uV, max_uV, ri->max_uV);
+		return -EDOM;
+	}
+
+	for (i = 0; i < ri->desc.n_voltages; i++) {
+		uV = ri->voltages[i];
+		if ((min_uV <= uV) && (uV <= max_uV)) {
+			val = (i << ri->voltage_shift) & ri->voltage_mask;
+			break;
+		}
+	}
+
+	if (i >= ri->desc.n_voltages)
+		return -EINVAL;
 
 	return aat2870->update(aat2870, ri->voltage_addr, ri->voltage_mask,
-			       selector << ri->voltage_shift);
+			       val);
 }
 
-static int aat2870_ldo_get_voltage_sel(struct regulator_dev *rdev)
+static int aat2870_ldo_get_voltage(struct regulator_dev *rdev)
 {
 	struct aat2870_regulator *ri = rdev_get_drvdata(rdev);
-	struct aat2870_data *aat2870 = ri->aat2870;
+	struct aat2870_data *aat2870 = dev_get_drvdata(ri->pdev->dev.parent);
 	u8 val;
 	int ret;
 
@@ -78,13 +98,17 @@ static int aat2870_ldo_get_voltage_sel(struct regulator_dev *rdev)
 	if (ret)
 		return ret;
 
-	return (val & ri->voltage_mask) >> ri->voltage_shift;
+	val = (val & ri->voltage_mask) >> ri->voltage_shift;
+	if (val >= ri->desc.n_voltages)
+		return -EIO;
+
+	return ri->voltages[val];
 }
 
 static int aat2870_ldo_enable(struct regulator_dev *rdev)
 {
 	struct aat2870_regulator *ri = rdev_get_drvdata(rdev);
-	struct aat2870_data *aat2870 = ri->aat2870;
+	struct aat2870_data *aat2870 = dev_get_drvdata(ri->pdev->dev.parent);
 
 	return aat2870->update(aat2870, ri->enable_addr, ri->enable_mask,
 			       ri->enable_mask);
@@ -93,7 +117,7 @@ static int aat2870_ldo_enable(struct regulator_dev *rdev)
 static int aat2870_ldo_disable(struct regulator_dev *rdev)
 {
 	struct aat2870_regulator *ri = rdev_get_drvdata(rdev);
-	struct aat2870_data *aat2870 = ri->aat2870;
+	struct aat2870_data *aat2870 = dev_get_drvdata(ri->pdev->dev.parent);
 
 	return aat2870->update(aat2870, ri->enable_addr, ri->enable_mask, 0);
 }
@@ -101,7 +125,7 @@ static int aat2870_ldo_disable(struct regulator_dev *rdev)
 static int aat2870_ldo_is_enabled(struct regulator_dev *rdev)
 {
 	struct aat2870_regulator *ri = rdev_get_drvdata(rdev);
-	struct aat2870_data *aat2870 = ri->aat2870;
+	struct aat2870_data *aat2870 = dev_get_drvdata(ri->pdev->dev.parent);
 	u8 val;
 	int ret;
 
@@ -114,8 +138,8 @@ static int aat2870_ldo_is_enabled(struct regulator_dev *rdev)
 
 static struct regulator_ops aat2870_ldo_ops = {
 	.list_voltage = aat2870_ldo_list_voltage,
-	.set_voltage_sel = aat2870_ldo_set_voltage_sel,
-	.get_voltage_sel = aat2870_ldo_get_voltage_sel,
+	.set_voltage = aat2870_ldo_set_voltage,
+	.get_voltage = aat2870_ldo_get_voltage,
 	.enable = aat2870_ldo_enable,
 	.disable = aat2870_ldo_disable,
 	.is_enabled = aat2870_ldo_is_enabled,
@@ -161,7 +185,7 @@ static struct aat2870_regulator *aat2870_get_regulator(int id)
 			break;
 	}
 
-	if (i == ARRAY_SIZE(aat2870_regulators))
+	if (!ri)
 		return NULL;
 
 	ri->enable_addr = AAT2870_LDO_EN;
@@ -186,10 +210,10 @@ static int aat2870_regulator_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Invalid device ID, %d\n", pdev->id);
 		return -EINVAL;
 	}
-	ri->aat2870 = dev_get_drvdata(pdev->dev.parent);
+	ri->pdev = pdev;
 
-	rdev = regulator_register(&ri->desc, &pdev->dev,
-				  mfd_get_data(pdev), ri, NULL);
+	rdev = regulator_register(&ri->desc, &pdev->dev, mfd_get_data(pdev),
+				  ri);
 	if (IS_ERR(rdev)) {
 		dev_err(&pdev->dev, "Failed to register regulator %s\n",
 			ri->desc.name);

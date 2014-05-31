@@ -113,7 +113,7 @@ struct platform_device tegra_gpio_device = {
 	.resource	= gpio_resource,
 	.num_resources	= ARRAY_SIZE(gpio_resource),
 };
-
+#if 0
 static struct resource pinmux_resource[] = {
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC
 	[0] = {
@@ -168,7 +168,7 @@ struct platform_device tegra_pinmux_device = {
 	.resource	= pinmux_resource,
 	.num_resources	= ARRAY_SIZE(pinmux_resource),
 };
-
+#endif
 static struct resource i2c_resource1[] = {
 	[0] = {
 		.start	= INT_I2C,
@@ -305,6 +305,15 @@ struct platform_device tegra_i2c_device4 = {
 		.platform_data = &tegra_dvc_platform_data,
 	},
 };
+
+#ifdef CONFIG_MACH_LGE
+#ifdef CONFIG_I2C_GPIO
+struct platform_device tegra_gpio_i2c = {
+	.name		= "i2c-gpio",
+	.id		= 5,
+};
+#endif
+#endif
 
 #ifndef CONFIG_ARCH_TEGRA_2x_SOC
 struct platform_device tegra_i2c_device5 = {
@@ -1531,11 +1540,6 @@ struct platform_device tegra_pcm_device = {
 	.id = -1,
 };
 
-struct platform_device tegra_tdm_pcm_device = {
-	.name = "tegra-tdm-pcm-audio",
-	.id = -1,
-};
-
 static struct resource w1_resources[] = {
 	[0] = {
 		.start = INT_OWR,
@@ -1912,7 +1916,7 @@ struct resource tegra_nvavp_resources[] = {
 	},
 };
 
-struct platform_device nvavp_device = {
+struct nvhost_device nvavp_device = {
 	.name           = "nvavp",
 	.id             = -1,
 	.resource       = tegra_nvavp_resources,
@@ -2111,7 +2115,7 @@ static struct resource tegra_disp1_resources[] = {
 	},
 };
 
-struct platform_device tegra_disp1_device = {
+struct nvhost_device tegra_disp1_device = {
 	.name		= "tegradc",
 	.id		= 0,
 	.resource	= tegra_disp1_resources,
@@ -2145,7 +2149,7 @@ static struct resource tegra_disp2_resources[] = {
 	},
 };
 
-struct platform_device tegra_disp2_device = {
+struct nvhost_device tegra_disp2_device = {
 	.name		= "tegradc",
 	.id		= 1,
 	.resource	= tegra_disp2_resources,

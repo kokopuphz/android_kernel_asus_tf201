@@ -27,7 +27,7 @@
 
 #define DRV_NAME	"pid_thermal_gov"
 
-#define MAX_ERR_TEMP_DEFAULT		9000	/* in mC */
+#define MAX_ERR_TEMP_DEFAULT		10000	/* in mC */
 #define MAX_ERR_GAIN_DEFAULT		1000
 #define GAIN_P_DEFAULT			1000
 #define GAIN_D_DEFAULT			0
@@ -379,8 +379,7 @@ static int pid_thermal_gov_throttle(struct thermal_zone_device *tz, int trip)
 {
 	struct thermal_instance *instance;
 	enum thermal_trip_type trip_type;
-	long trip_temp;
-	unsigned long target;
+	unsigned long trip_temp, target;
 
 	tz->ops->get_trip_type(tz, trip, &trip_type);
 	tz->ops->get_trip_temp(tz, trip, &trip_temp);
@@ -388,9 +387,7 @@ static int pid_thermal_gov_throttle(struct thermal_zone_device *tz, int trip)
 	mutex_lock(&tz->lock);
 
 	list_for_each_entry(instance, &tz->thermal_instances, tz_node) {
-		if ((instance->trip != trip) ||
-				((tz->temperature < trip_temp) &&
-				 (instance->target == THERMAL_NO_TARGET)))
+		if (instance->trip != trip)
 			continue;
 
 		target = pid_thermal_gov_get_target(tz, instance->cdev,
@@ -400,10 +397,12 @@ static int pid_thermal_gov_throttle(struct thermal_zone_device *tz, int trip)
 		else if (target < instance->lower)
 			target = instance->lower;
 
-		if ((tz->temperature < trip_temp) &&
-				(instance->target == instance->lower) &&
-				(target == instance->lower))
-			target = THERMAL_NO_TARGET;
+		if (tz->temperature < trip_temp) {
+			if ((target == instance->lower) &&
+					(instance->target == instance->lower ||
+					instance->target == THERMAL_NO_TARGET))
+				target = THERMAL_NO_TARGET;
+		}
 
 		if (instance->target == target)
 			continue;

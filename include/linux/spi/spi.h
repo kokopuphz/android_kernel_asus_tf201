@@ -337,6 +337,8 @@ struct spi_master {
 	 */
 	int			(*transfer)(struct spi_device *spi,
 						struct spi_message *mesg);
+	int			(*clock_control)(struct spi_device *spi,
+							int c_enable);
 
 	/* called on release() to free memory provided by spi_master */
 	void			(*cleanup)(struct spi_device *spi);
@@ -684,6 +686,10 @@ spi_read(struct spi_device *spi, void *buf, size_t len)
 extern int spi_write_then_read(struct spi_device *spi,
 		const void *txbuf, unsigned n_tx,
 		void *rxbuf, unsigned n_rx);
+
+/* HTC: to support write/read in full duplex mode */
+extern int spi_write_and_read(struct spi_device *spi,
+		u8 *txbuf, u8 *rxbuf, unsigned size);
 
 /**
  * spi_w8r8 - SPI synchronous 8 bit write followed by 8 bit read

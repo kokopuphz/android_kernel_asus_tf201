@@ -2,7 +2,7 @@
  * arch/arm/mach-tegra/board-roth-sdhci.c
  *
  * Copyright (C) 2010 Google, Inc.
- * Copyright (c) 2012-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2012-2013 NVIDIA Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -37,7 +37,6 @@
 #include "board.h"
 #include "board-roth.h"
 #include "dvfs.h"
-#include "tegra-board-id.h"
 
 #define ROTH_WLAN_PWR	TEGRA_GPIO_PCC5
 #define ROTH_WLAN_RST	TEGRA_GPIO_INVALID
@@ -141,13 +140,16 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data0 = {
 		.built_in = 0,
 		.ocr_mask = MMC_OCR_1V8_MASK,
 	},
+#ifndef CONFIG_MMC_EMBEDDED_SDIO
+	.pm_flags = MMC_PM_KEEP_POWER,
+#endif
 	.cd_gpio = -1,
 	.wp_gpio = -1,
 	.power_gpio = -1,
 	.tap_delay = 0x2,
 	.trim_delay = 0x2,
 	.ddr_clk_limit = 41000000,
-	.max_clk_limit = 156000000,
+	.max_clk_limit = 82000000,
 	.uhs_mask = MMC_UHS_MASK_DDR50,
 };
 
@@ -160,7 +162,6 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data2 = {
 	.ddr_clk_limit = 41000000,
 	.max_clk_limit = 82000000,
 	.uhs_mask = MMC_UHS_MASK_DDR50,
-	.power_off_rail = true,
 };
 
 static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
@@ -169,14 +170,11 @@ static struct tegra_sdhci_platform_data tegra_sdhci_platform_data3 = {
 	.power_gpio = -1,
 	.is_8bit = 1,
 	.tap_delay = 0x5,
-	.trim_delay = 0xA,
-	.ddr_clk_limit = 51000000,
-	.max_clk_limit = 156000000,
+	.trim_delay = 0,
+	.ddr_clk_limit = 41000000,
 	.mmc_data = {
 		.built_in = 1,
-		.ocr_mask = MMC_OCR_1V8_MASK,
-	},
-	.uhs_mask = MMC_MASK_HS200,
+	}
 };
 
 static struct platform_device tegra_sdhci_device0 = {
@@ -415,26 +413,11 @@ subsys_initcall_sync(roth_wifi_prepower);
 int __init roth_sdhci_init(void)
 {
 	int nominal_core_mv;
-	int min_vcore_override_mv;
 
-	nominal_core_mv =
-		tegra_dvfs_rail_get_nominal_millivolts(tegra_core_rail);
-	if (nominal_core_mv > 0) {
-		tegra_sdhci_platform_data0.nominal_vcore_mv = nominal_core_mv;
-		tegra_sdhci_platform_data2.nominal_vcore_mv = nominal_core_mv;
-		tegra_sdhci_platform_data3.nominal_vcore_mv = nominal_core_mv;
-	}
-	min_vcore_override_mv =
-		tegra_dvfs_rail_get_override_floor(tegra_core_rail);
-	if (min_vcore_override_mv) {
-		tegra_sdhci_platform_data0.min_vcore_override_mv =
-			min_vcore_override_mv;
-		tegra_sdhci_platform_data2.min_vcore_override_mv =
-			min_vcore_override_mv;
-		tegra_sdhci_platform_data3.min_vcore_override_mv =
-			min_vcore_override_mv;
-	}
-
+	nominal_core_mv = tegra_dvfs_rail_get_nominal_millivolts(tegra_core_rail);
+	if (nominal_core_mv > 0)
+		tegra_sdhci_platform_data0.nominal_vcore_uV = nominal_core_mv *
+			1000;
 	platform_device_register(&tegra_sdhci_device3);
 	platform_device_register(&tegra_sdhci_device2);
 	platform_device_register(&tegra_sdhci_device0);

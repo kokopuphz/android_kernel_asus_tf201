@@ -3,7 +3,7 @@
  *
  * CPU idle driver for Tegra11x CPUs
  *
- * Copyright (c) 2012-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012-2013, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -513,7 +513,7 @@ bool tegra11x_idle_power_down(struct cpuidle_device *dev,
 			idle_stats.clk_gating_vmin++;
 			cpu_do_idle();
 			tegra11_cpu_dfll_rate_exchange(&rate);
-			power_down = true;
+			power_down = false;
 		} else
 			power_down = tegra_cpu_core_power_down(dev, state,
 								request);

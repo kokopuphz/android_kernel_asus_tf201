@@ -109,7 +109,7 @@ static int __init roth_throttle_init(void)
 module_init(roth_throttle_init);
 
 static struct thermal_zone_params roth_nct1008_tzp = {
-	.governor_name = "step_wise",
+	.governor_name = "pid_thermal_gov",
 };
 
 static struct nct1008_platform_data roth_nct1008_pdata = {
@@ -128,7 +128,7 @@ static struct nct1008_platform_data roth_nct1008_pdata = {
 		/* Thermal Throttling */
 		[0] = {
 			.cdev_type = "tegra-balanced",
-			.trip_temp = 80000,
+			.trip_temp = 84000,
 			.trip_type = THERMAL_TRIP_PASSIVE,
 			.upper = THERMAL_NO_LIMIT,
 			.lower = THERMAL_NO_LIMIT,
@@ -136,7 +136,7 @@ static struct nct1008_platform_data roth_nct1008_pdata = {
 		},
 		[1] = {
 			.cdev_type = "tegra-heavy",
-			.trip_temp = 86000, /* shutdown_ext_limit - 2C */
+			.trip_temp = 89000, /* shutdown_ext_limit - 2C */
 			.trip_type = THERMAL_TRIP_PASSIVE,
 			.upper = 1,
 			.lower = 1,
@@ -219,8 +219,7 @@ static int roth_nct1008_init(void)
 	int ret = 0;
 
 	tegra_platform_edp_init(roth_nct1008_pdata.trips,
-				&roth_nct1008_pdata.num_trips,
-				0); /* edp temperature margin */
+				&roth_nct1008_pdata.num_trips);
 	tegra_add_cdev_trips(roth_nct1008_pdata.trips,
 				&roth_nct1008_pdata.num_trips);
 	tegra_add_tj_trips(roth_nct1008_pdata.trips,
@@ -247,6 +246,12 @@ static int roth_nct1008_init(void)
 	return ret;
 }
 
+static struct i2c_board_info __initdata bq20z45_pdata[] = {
+	{
+		I2C_BOARD_INFO("sbs-battery", 0x0B),
+	},
+};
+
 #ifdef CONFIG_TEGRA_SKIN_THROTTLE
 static int tegra_skin_match(struct thermal_zone_device *thz, void *data)
 {
@@ -270,7 +275,7 @@ static struct therm_est_data skin_data = {
 	.toffset = 9793,
 	.polling_period = 1100,
 	.ndevs = 2,
-	.tc1 = 10,
+	.tc1 = 5,
 	.tc2 = 1,
 	.devs = {
 			{
@@ -296,8 +301,8 @@ static struct therm_est_data skin_data = {
 				},
 			},
 	},
-	.trip_temp = 45000,
-	.passive_delay = 15000,
+	.trip_temp = 43000,
+	.passive_delay = 5000,
 };
 
 static struct throttle_table skin_throttle_table[] = {
@@ -418,8 +423,7 @@ static int roth_fan_est_get_temp(void *data, long *temp)
 	return 0;
 }
 
-/*Fan thermal estimator init data for P2454*/
-static struct therm_fan_est_data fan_est_data_p2454 = {
+static struct therm_fan_est_data fan_est_data = {
 	.toffset = 0,
 	.polling_period = 1100,
 	.ndevs = 2,
@@ -453,72 +457,20 @@ static struct therm_fan_est_data fan_est_data_p2454 = {
 	.active_hysteresis = {0, 10000, 7000, 0, 0, 0, 0, 0, 0, 0},
 };
 
-static struct platform_device roth_fan_therm_est_device_p2454 = {
+static struct platform_device roth_fan_therm_est_device = {
 	.name   = "therm-fan-est",
 	.id     = -1,
 	.num_resources  = 0,
 	.dev = {
-		.platform_data = &fan_est_data_p2454,
-	},
-};
-
-/*Fan thermal estimator data for P2560*/
-static struct therm_fan_est_data fan_est_data_p2560 = {
-	.toffset = 0,
-	.polling_period = 1100,
-	.ndevs = 2,
-	.devs = {
-			{
-				.dev_data = "nct_ext_soc",
-				.get_temp = roth_fan_est_get_temp,
-				.coeffs = {
-					100, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0
-				},
-			},
-			{
-				.dev_data = "nct_int_soc",
-				.get_temp = roth_fan_est_get_temp,
-				.coeffs = {
-					0, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0,
-					0, 0, 0, 0
-				},
-			},
-	},
-	.cdev_type = "pwm-fan",
-	.active_trip_temps = {0, 47000, 55000, 67000, 103000,
-				140000, 150000, 160000, 170000, 180000},
-	.active_hysteresis = {0, 12000, 7000, 10000, 0, 0, 0, 0, 0, 0},
-};
-
-static struct platform_device roth_fan_therm_est_device_p2560 = {
-	.name   = "therm-fan-est",
-	.id     = -1,
-	.num_resources  = 0,
-	.dev = {
-		.platform_data = &fan_est_data_p2560,
+		.platform_data = &fan_est_data,
 	},
 };
 
 static int __init roth_fan_est_init(void)
 {
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
-	if (board_info.board_id == BOARD_P2560)
-		platform_device_register(&roth_fan_therm_est_device_p2560);
-	else
-		platform_device_register(&roth_fan_therm_est_device_p2454);
-
+	platform_device_register(&roth_fan_therm_est_device);
 	return 0;
 }
-
 int __init roth_sensors_init(void)
 {
 	int err;
@@ -532,6 +484,10 @@ int __init roth_sensors_init(void)
 	mpuirq_init();
 
 	roth_fan_est_init();
+
+	if (0)
+		i2c_register_board_info(0, bq20z45_pdata,
+			ARRAY_SIZE(bq20z45_pdata));
 
 	return 0;
 }

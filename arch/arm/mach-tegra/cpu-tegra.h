@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/cpu-tegra.h
  *
- * Copyright (c) 2011-2013, NVIDIA Corporation.
+ * Copyright (c) 2011-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -27,7 +27,6 @@
 unsigned int tegra_getspeed(unsigned int cpu);
 int tegra_update_cpu_speed(unsigned long rate);
 int tegra_cpu_set_speed_cap(unsigned int *speed_cap);
-int tegra_cpu_set_speed_cap_locked(unsigned int *speed_cap);
 void tegra_cpu_set_volt_cap(unsigned int cap);
 unsigned int tegra_count_slow_cpus(unsigned long speed_limit);
 unsigned int tegra_get_slowest_cpu_n(void);
@@ -35,10 +34,20 @@ unsigned long tegra_cpu_lowest_speed(void);
 unsigned long tegra_cpu_highest_speed(void);
 
 #if defined(CONFIG_TEGRA_AUTO_HOTPLUG) && !defined(CONFIG_ARCH_TEGRA_2x_SOC)
+void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool in_suspend);
+#endif
+
+#if defined(CONFIG_TEGRA_AUTO_HOTPLUG) || defined(CONFIG_EPRJ_CPUMANAGER)
 int tegra_auto_hotplug_init(struct mutex *cpulock);
 void tegra_auto_hotplug_exit(void);
-void tegra_auto_hotplug_governor(unsigned int cpu_freq, bool suspend);
-#else
+#endif
+
+#ifdef CONFIG_EPRJ_CPUMANAGER
+void tegra_auto_hotplug_governor(unsigned int cpu_freq);
+int tegra_auto_hotplug_suspend(bool suspend);
+#endif
+
+#if !defined(CONFIG_TEGRA_AUTO_HOTPLUG) && !defined(CONFIG_EPRJ_CPUMANAGER)
 static inline int tegra_auto_hotplug_init(struct mutex *cpu_lock)
 { return 0; }
 static inline void tegra_auto_hotplug_exit(void)

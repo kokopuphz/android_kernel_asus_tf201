@@ -53,7 +53,6 @@ struct hwctx_reginfo {
 	unsigned int offset:12;
 	unsigned int count:16;
 	unsigned int type:2;
-        unsigned int rst_off;  //restore reg offset.
 };
 
 enum {
@@ -62,6 +61,6 @@ enum {
 	HWCTX_REGINFO_INDIRECT_4X
 };
 
-#define HWCTX_REGINFO(offset, count, type) {offset, count, HWCTX_REGINFO_##type, offset}
-#define HWCTX_REGINFO_RST(offset, count, type, rst) {offset, count, HWCTX_REGINFO_##type, rst}
+#define HWCTX_REGINFO(offset, count, type) {offset, count, HWCTX_REGINFO_##type}
+
 #endif

@@ -44,18 +44,12 @@ struct tegra_system_edp_entry {
 	unsigned int freq_limits[4];
 };
 
-struct tegra_edp_voltage_temp_constraint {
-	int temperature;
-	unsigned int voltage_limit_mV;
-};
-
 struct tegra_edp_cpu_leakage_params {
 	int cpu_speedo_id;
 	int dyn_consts_n[NR_CPUS];	 /* pre-multiplied by 1,000,000 */
 	int leakage_consts_n[NR_CPUS];	 /* pre-multiplied by 1,000,000 */
 	int leakage_consts_ijk[4][4][4]; /* pre-multiplied by 100,000 */
 	unsigned int safety_cap[4];
-	struct tegra_edp_voltage_temp_constraint volt_temp_cap;
 };
 
 struct tegra_edp_freq_voltage_table {
@@ -92,8 +86,7 @@ unsigned int tegra_get_edp_limit(int *get_edp_thermal_index);
 void tegra_get_system_edp_limits(const unsigned int **limits);
 int tegra_system_edp_alarm(bool alarm);
 unsigned int tegra_edp_find_maxf(int volt);
-void tegra_platform_edp_init(struct thermal_trip_info *trips,
-					int *num_trips, int margin);
+void tegra_platform_edp_init(struct thermal_trip_info *trips, int *num_trips);
 struct tegra_system_edp_entry *tegra_get_system_edp_entries(int *size);
 #else
 static inline struct thermal_cooling_device *edp_cooling_device_create(
@@ -117,7 +110,7 @@ static inline int tegra_system_edp_alarm(bool alarm)
 static inline unsigned int tegra_edp_find_maxf(int volt)
 { return -1; }
 static inline void tegra_platform_edp_init(struct thermal_trip_info *trips,
-					   int *num_trips, int margin)
+					   int *num_trips)
 {}
 static inline struct tegra_system_edp_entry
 		*tegra_get_system_edp_entries(int *size) { return NULL; }

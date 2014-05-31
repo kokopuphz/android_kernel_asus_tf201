@@ -1032,7 +1032,10 @@ static void __queue_work(unsigned int cpu, struct workqueue_struct *wq,
 	cwq = get_cwq(gcwq->cpu, wq);
 	trace_workqueue_queue_work(cpu, cwq, work);
 
-	BUG_ON(!list_empty(&work->entry));
+	if (WARN_ON(!list_empty(&work->entry))) {
+		spin_unlock_irqrestore(&gcwq->lock, flags);
+		return;
+	}
 
 	cwq->nr_in_flight[cwq->work_color]++;
 	work_flags = work_color_to_flags(cwq->work_color);
@@ -1052,18 +1055,42 @@ static void __queue_work(unsigned int cpu, struct workqueue_struct *wq,
 }
 
 /**
+ * queue_work_on - queue work on specific cpu
+ * @cpu: CPU number to execute work on
+ * @wq: workqueue to use
+ * @work: work to queue
+ *
+ * Returns %false if @work was already on a queue, %true otherwise.
+ *
+ * We queue the work to a specific CPU, the caller must ensure it
+ * can't go away.
+ */
+bool queue_work_on(int cpu, struct workqueue_struct *wq,
+		   struct work_struct *work)
+{
+	bool ret = false;
+
+	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
+		__queue_work(cpu, wq, work);
+		ret = true;
+	}
+	return ret;
+}
+EXPORT_SYMBOL_GPL(queue_work_on);
+
+/**
  * queue_work - queue work on a workqueue
  * @wq: workqueue to use
  * @work: work to queue
  *
- * Returns 0 if @work was already on a queue, non-zero otherwise.
+ * Returns %false if @work was already on a queue, %true otherwise.
  *
  * We queue the work to the CPU on which it was submitted, but if the CPU dies
  * it can be processed by another CPU.
  */
-int queue_work(struct workqueue_struct *wq, struct work_struct *work)
+bool queue_work(struct workqueue_struct *wq, struct work_struct *work)
 {
-	int ret;
+	bool ret;
 
 	ret = queue_work_on(get_cpu(), wq, work);
 	put_cpu();
@@ -1071,30 +1098,6 @@ int queue_work(struct workqueue_struct *wq, struct work_struct *work)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(queue_work);
-
-/**
- * queue_work_on - queue work on specific cpu
- * @cpu: CPU number to execute work on
- * @wq: workqueue to use
- * @work: work to queue
- *
- * Returns 0 if @work was already on a queue, non-zero otherwise.
- *
- * We queue the work to a specific CPU, the caller must ensure it
- * can't go away.
- */
-int
-queue_work_on(int cpu, struct workqueue_struct *wq, struct work_struct *work)
-{
-	int ret = 0;
-
-	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
-		__queue_work(cpu, wq, work);
-		ret = 1;
-	}
-	return ret;
-}
-EXPORT_SYMBOL_GPL(queue_work_on);
 
 static void delayed_work_timer_fn(unsigned long __data)
 {
@@ -1105,44 +1108,26 @@ static void delayed_work_timer_fn(unsigned long __data)
 }
 
 /**
- * queue_delayed_work - queue work on a workqueue after delay
- * @wq: workqueue to use
- * @dwork: delayable work to queue
- * @delay: number of jiffies to wait before queueing
- *
- * Returns 0 if @work was already on a queue, non-zero otherwise.
- */
-int queue_delayed_work(struct workqueue_struct *wq,
-			struct delayed_work *dwork, unsigned long delay)
-{
-	if (delay == 0)
-		return queue_work(wq, &dwork->work);
-
-	return queue_delayed_work_on(-1, wq, dwork, delay);
-}
-EXPORT_SYMBOL_GPL(queue_delayed_work);
-
-/**
  * queue_delayed_work_on - queue work on specific CPU after delay
  * @cpu: CPU number to execute work on
  * @wq: workqueue to use
  * @dwork: work to queue
  * @delay: number of jiffies to wait before queueing
  *
- * Returns 0 if @work was already on a queue, non-zero otherwise.
+ * Returns %false if @work was already on a queue, %true otherwise.
  */
-int queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
-			struct delayed_work *dwork, unsigned long delay)
+bool queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
+			   struct delayed_work *dwork, unsigned long delay)
 {
-	int ret = 0;
 	struct timer_list *timer = &dwork->timer;
 	struct work_struct *work = &dwork->work;
+	bool ret = false;
 
 	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
 		unsigned int lcpu;
 
-		BUG_ON(timer_pending(timer));
-		BUG_ON(!list_empty(&work->entry));
+		WARN_ON_ONCE(timer_pending(timer));
+		WARN_ON_ONCE(!list_empty(&work->entry));
 
 		timer_stats_timer_set_start_info(&dwork->timer);
 
@@ -1171,11 +1156,29 @@ int queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
 			add_timer_on(timer, cpu);
 		else
 			add_timer(timer);
-		ret = 1;
+		ret = true;
 	}
 	return ret;
 }
 EXPORT_SYMBOL_GPL(queue_delayed_work_on);
+
+/**
+ * queue_delayed_work - queue work on a workqueue after delay
+ * @wq: workqueue to use
+ * @dwork: delayable work to queue
+ * @delay: number of jiffies to wait before queueing
+ *
+ * Returns %false if @work was already on a queue, %true otherwise.
+ */
+bool queue_delayed_work(struct workqueue_struct *wq,
+			struct delayed_work *dwork, unsigned long delay)
+{
+	if (delay == 0)
+		return queue_work(wq, &dwork->work);
+
+	return queue_delayed_work_on(-1, wq, dwork, delay);
+}
+EXPORT_SYMBOL_GPL(queue_delayed_work);
 
 /**
  * worker_enter_idle - enter idle state
@@ -1944,9 +1947,17 @@ __acquires(&gcwq->lock)
 	 * lock freed" warnings as well as problems when looking into
 	 * work->lockdep_map, make a copy and use that here.
 	 */
-	struct lockdep_map lockdep_map = work->lockdep_map;
+	struct lockdep_map lockdep_map;
+
+	lockdep_copy_map(&lockdep_map, &work->lockdep_map);
 #endif
+	/*
+	 * Ensure we're on the correct CPU.  DISASSOCIATED test is
+	 * necessary to avoid spurious warnings from rescuers servicing the
+	 * unbound or a disassociated gcwq.
+	 */
 	WARN_ON_ONCE(!(worker->flags & (WORKER_UNBOUND | WORKER_REBIND)) &&
+		     !(gcwq->flags & GCWQ_DISASSOCIATED) &&
 		     raw_smp_processor_id() != gcwq->cpu);
 
 	/*
@@ -1988,7 +1999,9 @@ __acquires(&gcwq->lock)
 
 	spin_unlock_irq(&gcwq->lock);
 
+	smp_wmb();	/* paired with test_and_set_bit(PENDING) */
 	work_clear_pending(work);
+
 	lock_map_acquire_read(&cwq->wq->lockdep_map);
 	lock_map_acquire(&lockdep_map);
 	trace_workqueue_execute_start(work);
@@ -2172,8 +2185,10 @@ static int rescuer_thread(void *__wq)
 repeat:
 	set_current_state(TASK_INTERRUPTIBLE);
 
-	if (kthread_should_stop())
+	if (kthread_should_stop()) {
+		__set_current_state(TASK_RUNNING);
 		return 0;
+	}
 
 	/*
 	 * See whether any cpu is asking for help.  Unbounded
@@ -2646,6 +2661,9 @@ bool flush_work(struct work_struct *work)
 {
 	struct wq_barrier barr;
 
+	lock_map_acquire(&work->lockdep_map);
+	lock_map_release(&work->lockdep_map);
+
 	if (start_flush_work(work, &barr, true)) {
 		wait_for_completion(&barr.done);
 		destroy_work_on_stack(&barr.work);
@@ -2866,49 +2884,34 @@ bool cancel_delayed_work_sync(struct delayed_work *dwork)
 EXPORT_SYMBOL(cancel_delayed_work_sync);
 
 /**
- * schedule_work - put work task in global workqueue
- * @work: job to be done
- *
- * Returns zero if @work was already on the kernel-global workqueue and
- * non-zero otherwise.
- *
- * This puts a job in the kernel-global workqueue if it was not already
- * queued and leaves it in the same position on the kernel-global
- * workqueue otherwise.
- */
-int schedule_work(struct work_struct *work)
-{
-	return queue_work(system_wq, work);
-}
-EXPORT_SYMBOL(schedule_work);
-
-/*
  * schedule_work_on - put work task on a specific cpu
  * @cpu: cpu to put the work task on
  * @work: job to be done
  *
  * This puts a job on a specific cpu
  */
-int schedule_work_on(int cpu, struct work_struct *work)
+bool schedule_work_on(int cpu, struct work_struct *work)
 {
 	return queue_work_on(cpu, system_wq, work);
 }
 EXPORT_SYMBOL(schedule_work_on);
 
 /**
- * schedule_delayed_work - put work task in global workqueue after delay
- * @dwork: job to be done
- * @delay: number of jiffies to wait or 0 for immediate execution
+ * schedule_work - put work task in global workqueue
+ * @work: job to be done
  *
- * After waiting for a given time this puts a job in the kernel-global
- * workqueue.
+ * Returns %false if @work was already on the kernel-global workqueue and
+ * %true otherwise.
+ *
+ * This puts a job in the kernel-global workqueue if it was not already
+ * queued and leaves it in the same position on the kernel-global
+ * workqueue otherwise.
  */
-int schedule_delayed_work(struct delayed_work *dwork,
-					unsigned long delay)
+bool schedule_work(struct work_struct *work)
 {
-	return queue_delayed_work(system_wq, dwork, delay);
+	return queue_work(system_wq, work);
 }
-EXPORT_SYMBOL(schedule_delayed_work);
+EXPORT_SYMBOL(schedule_work);
 
 /**
  * schedule_delayed_work_on - queue work in global workqueue on CPU after delay
@@ -2919,12 +2922,26 @@ EXPORT_SYMBOL(schedule_delayed_work);
  * After waiting for a given time this puts a job in the kernel-global
  * workqueue on the specified CPU.
  */
-int schedule_delayed_work_on(int cpu,
-			struct delayed_work *dwork, unsigned long delay)
+bool schedule_delayed_work_on(int cpu, struct delayed_work *dwork,
+			      unsigned long delay)
 {
 	return queue_delayed_work_on(cpu, system_wq, dwork, delay);
 }
 EXPORT_SYMBOL(schedule_delayed_work_on);
+
+/**
+ * schedule_delayed_work - put work task in global workqueue after delay
+ * @dwork: job to be done
+ * @delay: number of jiffies to wait or 0 for immediate execution
+ *
+ * After waiting for a given time this puts a job in the kernel-global
+ * workqueue.
+ */
+bool schedule_delayed_work(struct delayed_work *dwork, unsigned long delay)
+{
+	return queue_delayed_work(system_wq, dwork, delay);
+}
+EXPORT_SYMBOL(schedule_delayed_work);
 
 /**
  * schedule_on_each_cpu - execute a function synchronously on each online CPU
@@ -3488,18 +3505,17 @@ static int __devinit workqueue_cpu_down_callback(struct notifier_block *nfb,
 #ifdef CONFIG_SMP
 
 struct work_for_cpu {
-	struct completion completion;
+	struct work_struct work;
 	long (*fn)(void *);
 	void *arg;
 	long ret;
 };
 
-static int do_work_for_cpu(void *_wfc)
+static void work_for_cpu_fn(struct work_struct *work)
 {
-	struct work_for_cpu *wfc = _wfc;
+	struct work_for_cpu *wfc = container_of(work, struct work_for_cpu, work);
+
 	wfc->ret = wfc->fn(wfc->arg);
-	complete(&wfc->completion);
-	return 0;
 }
 
 /**
@@ -3514,19 +3530,11 @@ static int do_work_for_cpu(void *_wfc)
  */
 long work_on_cpu(unsigned int cpu, long (*fn)(void *), void *arg)
 {
-	struct task_struct *sub_thread;
-	struct work_for_cpu wfc = {
-		.completion = COMPLETION_INITIALIZER_ONSTACK(wfc.completion),
-		.fn = fn,
-		.arg = arg,
-	};
+	struct work_for_cpu wfc = { .fn = fn, .arg = arg };
 
-	sub_thread = kthread_create(do_work_for_cpu, &wfc, "work_for_cpu");
-	if (IS_ERR(sub_thread))
-		return PTR_ERR(sub_thread);
-	kthread_bind(sub_thread, cpu);
-	wake_up_process(sub_thread);
-	wait_for_completion(&wfc.completion);
+	INIT_WORK_ONSTACK(&wfc.work, work_for_cpu_fn);
+	schedule_work_on(cpu, &wfc.work);
+	flush_work(&wfc.work);
 	return wfc.ret;
 }
 EXPORT_SYMBOL_GPL(work_on_cpu);

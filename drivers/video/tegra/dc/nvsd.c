@@ -20,7 +20,7 @@
 #include <linux/string.h>
 #include <linux/slab.h>
 #include <linux/backlight.h>
-#include <linux/stat.h>
+#include <linux/platform_device.h>
 
 #include "dc_reg.h"
 #include "dc_priv.h"
@@ -55,17 +55,6 @@ NVSD_ATTR(fc_time_limit);
 NVSD_ATTR(fc_threshold);
 NVSD_ATTR(lut);
 NVSD_ATTR(bltf);
-#ifdef CONFIG_TEGRA_SD_GEN2
-NVSD_ATTR(k_limit_enable);
-NVSD_ATTR(k_limit);
-NVSD_ATTR(sd_window_enable);
-NVSD_ATTR(sd_window);
-NVSD_ATTR(soft_clipping_enable);
-NVSD_ATTR(soft_clipping_threshold);
-NVSD_ATTR(smooth_k_enable);
-NVSD_ATTR(smooth_k_incr);
-NVSD_ATTR(use_vpulse2);
-#endif
 static struct kobj_attribute nvsd_attr_registers =
 	__ATTR(registers, S_IRUGO, nvsd_registers_show, NULL);
 
@@ -85,17 +74,6 @@ static struct attribute *nvsd_attrs[] = {
 	NVSD_ATTRS_ENTRY(lut),
 	NVSD_ATTRS_ENTRY(bltf),
 	NVSD_ATTRS_ENTRY(registers),
-#ifdef CONFIG_TEGRA_SD_GEN2
-	NVSD_ATTRS_ENTRY(k_limit_enable),
-	NVSD_ATTRS_ENTRY(k_limit),
-	NVSD_ATTRS_ENTRY(sd_window_enable),
-	NVSD_ATTRS_ENTRY(sd_window),
-	NVSD_ATTRS_ENTRY(soft_clipping_enable),
-	NVSD_ATTRS_ENTRY(soft_clipping_threshold),
-	NVSD_ATTRS_ENTRY(smooth_k_enable),
-	NVSD_ATTRS_ENTRY(smooth_k_incr),
-	NVSD_ATTRS_ENTRY(use_vpulse2),
-#endif
 	NULL,
 };
 
@@ -106,7 +84,7 @@ static struct attribute_group nvsd_attr_group = {
 static struct kobject *nvsd_kobj;
 
 /* shared brightness variable */
-static atomic_t *sd_brightness;
+static atomic_t *sd_brightness = NULL;
 /* shared boolean for manual K workaround */
 static atomic_t man_k_until_blank = ATOMIC_INIT(0);
 
@@ -196,9 +174,7 @@ static bool nvsd_phase_in_adjustments(struct tegra_dc *dc,
 			/* Set manual k value */
 			man_k = SD_MAN_K_R(cur_k) |
 				SD_MAN_K_G(cur_k) | SD_MAN_K_B(cur_k);
-			tegra_dc_io_start(dc);
 			tegra_dc_writel(dc, man_k, DC_DISP_SD_MAN_K_VALUES);
-			tegra_dc_io_end(dc);
 			/* Set manual brightness value */
 			atomic_set(sd_brightness, cur_sd_brightness);
 		}
@@ -295,7 +271,6 @@ static void nvsd_cmd_handler(struct tegra_dc_sd_settings *settings,
 				val &= ~SD_BIN_WIDTH_MASK;
 				val |= bw;
 			}
-
 			tegra_dc_writel(dc, val, DC_DISP_SD_CONTROL);
 
 			nvsd_phase_in_luts(settings, dc);
@@ -373,11 +348,9 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 {
 	u32 i = 0;
 	u32 val = 0;
-	u32 bw = 0;
 	u32 bw_idx = 0;
 	/* TODO: check if HW says SD's available */
 
-	tegra_dc_io_start(dc);
 	/* If SD's not present or disabled, clear the register and return. */
 	if (!settings || settings->enable == 0) {
 		/* clear the brightness val, too. */
@@ -389,7 +362,6 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 		if (settings)
 			settings->phase_settings_step = 0;
 		tegra_dc_writel(dc, 0, DC_DISP_SD_CONTROL);
-		tegra_dc_io_end(dc);
 		return;
 	}
 
@@ -420,14 +392,7 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 	tegra_dc_writel(dc, val, DC_DISP_SD_CONTROL);
 
 	bw_idx = nvsd_get_bw_idx(settings);
-	bw = SD_BIN_WIDTH(bw_idx);
 
-	/* Values of SD LUT & BL TF are different according to bin_width on T30
-	 * due to HW bug. Therefore we use bin_width to select the correct table
-	 * on T30. On T114, we will use 1st table by default.*/
-#ifdef CONFIG_TEGRA_SD_GEN2
-	bw_idx = 0;
-#endif
 	/* Write LUT */
 	if (!settings->cmd) {
 		dev_dbg(&dc->ndev->dev, "  LUT:\n");
@@ -503,49 +468,6 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 	tegra_dc_writel(dc, val, DC_DISP_SD_FLICKER_CONTROL);
 	dev_dbg(&dc->ndev->dev, "  FLICKER_CONTROL: 0x%08x\n", val);
 
-#ifdef CONFIG_TEGRA_SD_GEN2
-	/* Write K limit */
-	if (settings->k_limit_enable) {
-		val = settings->k_limit;
-		if (val < 128)
-			val = 128;
-		else if (val > 255)
-			val = 255;
-		val = SD_K_LIMIT(val);
-		tegra_dc_writel(dc, val, DC_DISP_SD_K_LIMIT);
-		dev_dbg(&dc->ndev->dev, "  K_LIMIT: 0x%08x\n", val);
-	}
-
-	if (settings->sd_window_enable) {
-		/* Write sd window */
-		val = SD_WIN_H_POSITION(settings->sd_window.h_position) |
-			SD_WIN_V_POSITION(settings->sd_window.v_position);
-		tegra_dc_writel(dc, val, DC_DISP_SD_WINDOW_POSITION);
-		dev_dbg(&dc->ndev->dev, "  SD_WINDOW_POSITION: 0x%08x\n", val);
-
-		val = SD_WIN_H_POSITION(settings->sd_window.h_size) |
-			SD_WIN_V_POSITION(settings->sd_window.v_size);
-		tegra_dc_writel(dc, val, DC_DISP_SD_WINDOW_SIZE);
-		dev_dbg(&dc->ndev->dev, "  SD_WINDOW_SIZE: 0x%08x\n", val);
-	}
-
-	if (settings->soft_clipping_enable) {
-		/* Write soft clipping */
-		val = (64 * 1024) / (256 - settings->soft_clipping_threshold);
-		val = SD_SOFT_CLIPPING_RECIP(val) |
-		SD_SOFT_CLIPPING_THRESHOLD(settings->soft_clipping_threshold);
-		tegra_dc_writel(dc, val, DC_DISP_SD_SOFT_CLIPPING);
-		dev_dbg(&dc->ndev->dev, "  SOFT_CLIPPING: 0x%08x\n", val);
-	}
-
-	if (settings->smooth_k_enable) {
-		/* Write K incr value */
-		val = SD_SMOOTH_K_INCR(settings->smooth_k_incr);
-		tegra_dc_writel(dc, val, DC_DISP_SD_SMOOTH_K);
-		dev_dbg(&dc->ndev->dev, "  SMOOTH_K: 0x%08x\n", val);
-	}
-#endif
-
 	/* Manage SD Control */
 	val = 0;
 	/* Stay in manual correction mode until the next flip. */
@@ -560,24 +482,11 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 	val |= (settings->use_vid_luma) ? SD_USE_VID_LUMA : 0;
 	/* Aggressiveness */
 	val |= SD_AGGRESSIVENESS(settings->aggressiveness);
-	/* Bin Width (value derived above) */
-	val |= bw;
-#ifdef CONFIG_TEGRA_SD_GEN2
-	/* K limit enable */
-	val |= (settings->k_limit_enable) ? SD_K_LIMIT_ENABLE : 0;
-	/* Programmable sd window enable */
-	val |= (settings->sd_window_enable) ? SD_WINDOW_ENABLE : 0;
-	/* Soft clipping enable */
-	val |= (settings->soft_clipping_enable) ? SD_SOFT_CLIPPING_ENABLE : 0;
-	/* Smooth K enable */
-	val |= (settings->smooth_k_enable) ? SD_SMOOTH_K_ENABLE : 0;
-	/* SD proc control */
-	val |= (settings->use_vpulse2) ? SD_VPULSE2 : SD_VSYNC;
-#endif
+	/* Bin Width (value derived from bw_idx) */
+	val |= bw_idx << 3;
 	/* Finally, Write SD Control */
 	tegra_dc_writel(dc, val, DC_DISP_SD_CONTROL);
 	dev_dbg(&dc->ndev->dev, "  SD_CONTROL: 0x%08x\n", val);
-	tegra_dc_io_end(dc);
 
 	/* set the brightness pointer */
 	sd_brightness = settings->sd_brightness;
@@ -586,125 +495,11 @@ void nvsd_init(struct tegra_dc *dc, struct tegra_dc_sd_settings *settings)
 	atomic_set(&man_k_until_blank, 1);
 }
 
-static int bl_tf[17] = {
-				57,  65,  73,  82,  92,
-				103, 114, 125, 138, 150,
-				164, 178, 193, 208, 224,
-				241, 255,
-			};
-
-static int nvsd_backlght_interplate(u32 in, u32 base)
-{
-	int q, r;
-
-	if (in <= base)
-		return bl_tf[0];
-
-	if (in > 255) {
-		WARN(1, "PRISM gain is out of range!\n");
-		return -1;
-	}
-
-	q = (in - base) / 8;
-	r = (in - base) % 8;
-
-	return (bl_tf[q] * (8 - r) + bl_tf[q + 1] * r) / 8;
-}
-
-/* Estimate the pixel gain of PRISM enhancement and soft-clipping algorithm*/
-static u32 nvsd_softclip(fixed20_12 pixel, fixed20_12 k, fixed20_12 th)
-{
-	fixed20_12 num, f;
-
-	if (pixel.full >= th.full) {
-		num.full = pixel.full - th.full;
-		f.full = dfixed_const(1) - dfixed_div(num, th);
-	} else {
-		f.full = dfixed_const(1);
-	}
-
-	num.full = dfixed_mul(pixel, f);
-	f.full = dfixed_mul(num, k);
-	num.full = pixel.full + f.full;
-
-	return min_t(u32, num.full, dfixed_const(255));
-}
-
-static int nvsd_set_brightness(struct tegra_dc *dc)
-{
-	u32 bin_width;
-	int i, j;
-	int val;
-	int pix;
-	int bin_idx;
-
-	int incr;
-	int base;
-
-	u32 histo[32];
-	u32 histo_total = 0;		/* count of pixels */
-	fixed20_12 nonhisto_gain;	/* gain of pixels not in histogram */
-	fixed20_12 est_achieved_gain;	/* final gain of pixels */
-	fixed20_12 histo_gain = dfixed_init(0);	/* gain of pixels */
-	fixed20_12 k, threshold;
-	fixed20_12 den, num, out;
-	fixed20_12 pix_avg, pix_avg_softclip;
-
-	/* Collet the inputs of the algorithm */
-	for (i = 0; i < DC_DISP_SD_HISTOGRAM_NUM; i++) {
-		val = tegra_dc_readl(dc, DC_DISP_SD_HISTOGRAM(i));
-		for (j = 0; j < 4; j++)
-			histo[i * 4 + j] = SD_HISTOGRAM_BIN(val, (j * 8));
-	}
-
-	val = tegra_dc_readl(dc, DC_DISP_SD_HW_K_VALUES);
-	k.full = SD_HW_K_R(val) << 2;
-
-	val = tegra_dc_readl(dc, DC_DISP_SD_SOFT_CLIPPING);
-	threshold.full = dfixed_const(SD_SOFT_CLIPPING_THRESHOLD(val));
-
-	val = tegra_dc_readl(dc, DC_DISP_SD_CONTROL);
-	bin_width = SD_BIN_WIDTH(val)>>3;
-	incr = 1 << bin_width;
-	base = 256 - 32 * incr;
-
-	for (pix = base, bin_idx = 0; pix < 256; pix += incr, bin_idx++) {
-		num.full = dfixed_const(pix + pix + incr);
-		den.full = dfixed_const(2);
-		pix_avg.full = dfixed_div(num, den);
-		pix_avg_softclip.full = nvsd_softclip(pix_avg, k, threshold);
-
-		num.full = dfixed_const(histo[bin_idx]);
-		den.full = dfixed_const(256);
-		out.full = dfixed_div(num, den);
-		num.full = dfixed_mul(out, pix_avg_softclip);
-		out.full = dfixed_div(num, pix_avg);
-		histo_gain.full += out.full;
-		histo_total += histo[bin_idx];
-	}
-
-	out.full = dfixed_const(256 - histo_total);
-	den.full = dfixed_const(1) + k.full;
-	num.full = dfixed_mul(out, den);
-	den.full = dfixed_const(256);
-	nonhisto_gain.full = dfixed_div(num, den);
-
-	den.full = nonhisto_gain.full + histo_gain.full;
-	num.full = dfixed_const(1);
-	out.full = dfixed_div(num, den);
-	num.full = dfixed_const(255);
-	est_achieved_gain.full = dfixed_mul(num, out);
-	val = dfixed_trunc(est_achieved_gain);
-
-	return nvsd_backlght_interplate(val, 128);
-}
-
 /* Periodic update */
 bool nvsd_update_brightness(struct tegra_dc *dc)
 {
 	u32 val = 0;
 	int cur_sd_brightness;
-	int sw_sd_brightness;
 	struct tegra_dc_sd_settings *settings = dc->out->sd_settings;
 
 	if (sd_brightness) {
@@ -729,23 +524,13 @@ bool nvsd_update_brightness(struct tegra_dc *dc)
 		val = tegra_dc_readl(dc, DC_DISP_SD_BL_CONTROL);
 		val = SD_BLC_BRIGHTNESS(val);
 
-		/* PRISM is updated by hw or sw algorithm. Brightness is
-		 * compensated according to histogram for soft-clipping
-		 * if hw output is used to update brightness. */
 		if (settings->phase_in_adjustments) {
 			return nvsd_phase_in_adjustments(dc, settings);
-		} else if (settings->soft_clipping_correction) {
-			sw_sd_brightness = nvsd_set_brightness(dc);
-			if (sw_sd_brightness != cur_sd_brightness) {
-				atomic_set(sd_brightness, sw_sd_brightness);
-				return true;
-			}
 		} else if (val != (u32)cur_sd_brightness) {
 			/* set brightness value and note the update */
 			atomic_set(sd_brightness, (int)val);
 			return true;
 		}
-
 	}
 
 	/* No update needed. */
@@ -804,8 +589,8 @@ static ssize_t nvsd_settings_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
 	struct device *dev = container_of((kobj->parent), struct device, kobj);
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
+	struct nvhost_device *ndev = to_nvhost_device(dev);
+	struct tegra_dc *dc = nvhost_get_drvdata(ndev);
 	struct tegra_dc_sd_settings *sd_settings = dc->out->sd_settings;
 	ssize_t res = 0;
 
@@ -849,39 +634,6 @@ static ssize_t nvsd_settings_show(struct kobject *kobj,
 		else if (IS_NVSD_ATTR(fc_threshold))
 			res = snprintf(buf, PAGE_SIZE, "%d\n",
 				sd_settings->fc.threshold);
-#ifdef CONFIG_TEGRA_SD_GEN2
-		else if (IS_NVSD_ATTR(k_limit_enable))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->k_limit_enable);
-		else if (IS_NVSD_ATTR(k_limit))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->k_limit);
-		else if (IS_NVSD_ATTR(sd_window_enable))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->sd_window_enable);
-		else if (IS_NVSD_ATTR(sd_window))
-			res = snprintf(buf, PAGE_SIZE,
-				"x: %d, y: %d, w: %d, h: %d\n",
-				sd_settings->sd_window.h_position,
-				sd_settings->sd_window.v_position,
-				sd_settings->sd_window.h_size,
-				sd_settings->sd_window.v_size);
-		else if (IS_NVSD_ATTR(soft_clipping_enable))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->soft_clipping_enable);
-		else if (IS_NVSD_ATTR(soft_clipping_threshold))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->soft_clipping_threshold);
-		else if (IS_NVSD_ATTR(smooth_k_enable))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->smooth_k_enable);
-		else if (IS_NVSD_ATTR(smooth_k_incr))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->smooth_k_incr);
-		else if (IS_NVSD_ATTR(use_vpulse2))
-			res = snprintf(buf, PAGE_SIZE, "%d\n",
-				sd_settings->use_vpulse2);
-#endif
 		else if (IS_NVSD_ATTR(lut))
 			res = nvsd_lut_show(sd_settings, buf, res);
 		else if (IS_NVSD_ATTR(bltf))
@@ -976,8 +728,8 @@ static ssize_t nvsd_settings_store(struct kobject *kobj,
 	struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	struct device *dev = container_of((kobj->parent), struct device, kobj);
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
+	struct nvhost_device *ndev = to_nvhost_device(dev);
+	struct tegra_dc *dc = nvhost_get_drvdata(ndev);
 	struct tegra_dc_sd_settings *sd_settings = dc->out->sd_settings;
 	ssize_t res = count;
 	bool settings_updated = false;
@@ -1036,37 +788,6 @@ static ssize_t nvsd_settings_store(struct kobject *kobj,
 			nvsd_check_and_update(0, 255, fc.time_limit);
 		} else if (IS_NVSD_ATTR(fc_threshold)) {
 			nvsd_check_and_update(0, 255, fc.threshold);
-#ifdef CONFIG_TEGRA_SD_GEN2
-		} else if (IS_NVSD_ATTR(k_limit_enable)) {
-			nvsd_check_and_update(0, 1, k_limit_enable);
-		} else if (IS_NVSD_ATTR(k_limit)) {
-			nvsd_check_and_update(128, 255, k_limit);
-		} else if (IS_NVSD_ATTR(sd_window_enable)) {
-			nvsd_check_and_update(0, 1, sd_window_enable);
-		} else if (IS_NVSD_ATTR(sd_window)) {
-			int ele[4], i = 0, num = 4;
-			nvsd_get_multi(ele, num, i, 0, LONG_MAX);
-
-			if (i == num) {
-				sd_settings->sd_window.h_position = ele[0];
-				sd_settings->sd_window.v_position = ele[1];
-				sd_settings->sd_window.h_size = ele[2];
-				sd_settings->sd_window.v_size = ele[3];
-				settings_updated = true;
-			} else {
-				res = -EINVAL;
-			}
-		} else if (IS_NVSD_ATTR(soft_clipping_enable)) {
-			nvsd_check_and_update(0, 1, soft_clipping_enable);
-		} else if (IS_NVSD_ATTR(soft_clipping_threshold)) {
-			nvsd_check_and_update(0, 255, soft_clipping_threshold);
-		} else if (IS_NVSD_ATTR(smooth_k_enable)) {
-			nvsd_check_and_update(0, 1, smooth_k_enable);
-		} else if (IS_NVSD_ATTR(smooth_k_incr)) {
-			nvsd_check_and_update(0, 16320, smooth_k_incr);
-		} else if (IS_NVSD_ATTR(use_vpulse2)) {
-			nvsd_check_and_update(0, 1, use_vpulse2);
-#endif
 		} else if (IS_NVSD_ATTR(lut)) {
 			if (nvsd_lut_store(sd_settings, buf))
 				res = -EINVAL;
@@ -1089,11 +810,9 @@ static ssize_t nvsd_settings_store(struct kobject *kobj,
 				return -ENODEV;
 			}
 
-			tegra_dc_io_start(dc);
 			tegra_dc_hold_dc_out(dc);
 			nvsd_init(dc, sd_settings);
 			tegra_dc_release_dc_out(dc);
-			tegra_dc_io_end(dc);
 
 			mutex_unlock(&dc->lock);
 
@@ -1101,8 +820,10 @@ static ssize_t nvsd_settings_store(struct kobject *kobj,
 			if (!sd_settings->enable && sd_settings->bl_device) {
 				/* Do the actual brightness update outside of
 				 * the mutex */
-				struct backlight_device *bl =
+				struct platform_device *pdev =
 					sd_settings->bl_device;
+				struct backlight_device *bl =
+					platform_get_drvdata(pdev);
 
 				if (bl)
 					backlight_update_status(bl);
@@ -1136,12 +857,9 @@ static ssize_t nvsd_registers_show(struct kobject *kobj,
 	struct kobj_attribute *attr, char *buf)
 {
 	struct device *dev = container_of((kobj->parent), struct device, kobj);
-	struct platform_device *ndev = to_platform_device(dev);
-	struct tegra_dc *dc = platform_get_drvdata(ndev);
+	struct nvhost_device *ndev = to_nvhost_device(dev);
+	struct tegra_dc *dc = nvhost_get_drvdata(ndev);
 	ssize_t res = 0;
-
-	clk_enable(dc->clk);
-	tegra_dc_io_start(dc);
 
 	mutex_lock(&dc->lock);
 	if (!dc->enabled) {
@@ -1161,16 +879,6 @@ static ssize_t nvsd_registers_show(struct kobject *kobj,
 	NVSD_PRINT_REG(DC_DISP_SD_BL_CONTROL);
 	NVSD_PRINT_REG(DC_DISP_SD_HW_K_VALUES);
 	NVSD_PRINT_REG(DC_DISP_SD_MAN_K_VALUES);
-#ifdef CONFIG_TEGRA_SD_GEN2
-	NVSD_PRINT_REG(DC_DISP_SD_K_LIMIT);
-	NVSD_PRINT_REG(DC_DISP_SD_WINDOW_POSITION);
-	NVSD_PRINT_REG(DC_DISP_SD_WINDOW_SIZE);
-	NVSD_PRINT_REG(DC_DISP_SD_SOFT_CLIPPING);
-	NVSD_PRINT_REG(DC_DISP_SD_SMOOTH_K);
-#endif
-
-	tegra_dc_io_end(dc);
-	clk_disable(dc->clk);
 
 	return res;
 }

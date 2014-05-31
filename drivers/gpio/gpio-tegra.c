@@ -36,7 +36,6 @@
 #include <mach/gpio-tegra.h>
 #include <mach/iomap.h>
 #include <mach/legacy_irq.h>
-#include <mach/pinmux.h>
 
 #include "../../arch/arm/mach-tegra/pm-irq.h"
 
@@ -107,12 +106,6 @@ static int tegra_gpio_compose(int bank, int port, int bit)
 	return (bank << 5) | ((port & 0x3) << 3) | (bit & 0x7);
 }
 
-void tegra_gpio_set_tristate(int gpio_nr, enum tegra_tristate ts)
-{
-	int pin_group  =  tegra_pinmux_get_pingroup(gpio_nr);
-	tegra_pinmux_set_tristate(pin_group, ts);
-}
-
 static void tegra_gpio_mask_write(u32 reg, int gpio, int value)
 {
 	u32 val;
@@ -136,7 +129,7 @@ int tegra_gpio_get_bank_int_nr(int gpio)
 	return irq;
 }
 
-static void tegra_gpio_enable(int gpio)
+void tegra_gpio_enable(int gpio)
 {
 	if (gpio >= TEGRA_NR_GPIOS) {
 		pr_warn("%s : Invalid gpio ID - %d\n", __func__, gpio);
@@ -156,7 +149,7 @@ int tegra_is_gpio(int gpio)
 EXPORT_SYMBOL(tegra_is_gpio);
 
 
-static void tegra_gpio_disable(int gpio)
+void tegra_gpio_disable(int gpio)
 {
 	if (gpio >= TEGRA_NR_GPIOS) {
 		pr_warn("%s : Invalid gpio ID - %d\n", __func__, gpio);
@@ -475,7 +468,7 @@ static struct syscore_ops tegra_gpio_syscore_ops = {
 	.resume = tegra_gpio_resume,
 };
 
-int tegra_gpio_resume_init(void)
+int tegra_gpio_syscore_init(void)
 {
 	register_syscore_ops(&tegra_gpio_syscore_ops);
 	return 0;
@@ -633,6 +626,8 @@ static int __devinit tegra_gpio_probe(struct platform_device *pdev)
 		irq_set_chained_handler(bank->irq, tegra_gpio_irq_handler);
 
 	}
+
+	tegra_gpio_syscore_init();
 
 	return 0;
 }

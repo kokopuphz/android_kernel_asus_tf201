@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/board-roth-pinmux.c
  *
- * Copyright (c) 2012-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2012 NVIDIA Corporation
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -177,13 +177,12 @@ static __initdata struct tegra_drive_pingroup_config roth_drive_pinmux[] = {
 	SET_DRIVE(SDIO3, DISABLE, DISABLE, DIV_1, 22, 36, FASTEST, FASTEST),
 
 	/* SDMMC4 */
-	SET_DRIVE_WITH_TYPE(GMA, DISABLE, DISABLE, DIV_1, 2, 2, FASTEST,
-								FASTEST, 1),
+	SET_DRIVE_WITH_TYPE(GMA, DISABLE, DISABLE, DIV_1, 2, 1, FASTEST, FASTEST, 1),
 };
 
 /* Initially setting all used GPIO's to non-TRISTATE */
 static __initdata struct tegra_pingroup_config roth_pinmux_set_nontristate[] = {
-	DEFAULT_PINMUX(GPIO_X4_AUD,     RSVD,   PULL_UP,      NORMAL,    INPUT),
+	DEFAULT_PINMUX(GPIO_X4_AUD,     RSVD,   PULL_DOWN,    NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GPIO_X5_AUD,     RSVD,   PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GPIO_X6_AUD,     RSVD3,  PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GPIO_X7_AUD,     RSVD,   PULL_DOWN,    NORMAL,    OUTPUT),
@@ -210,13 +209,12 @@ static __initdata struct tegra_pingroup_config roth_pinmux_set_nontristate[] = {
 	DEFAULT_PINMUX(GMI_AD1,         GMI,    NORMAL,       NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GMI_AD10,        GMI,    PULL_UP,    NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GMI_AD11,        GMI,    PULL_DOWN,    NORMAL,    OUTPUT),
-	DEFAULT_PINMUX(GMI_AD12,        GMI,    PULL_UP,      NORMAL,    OUTPUT),
-	DEFAULT_PINMUX(GMI_AD14,        GMI,    PULL_UP,      NORMAL,    INPUT),
-	DEFAULT_PINMUX(GMI_AD15,        GMI,    PULL_UP,      NORMAL,    OUTPUT),
+	DEFAULT_PINMUX(GMI_AD12,        GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_AD13,        GMI,    PULL_DOWN,    NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GMI_AD2,         GMI,    NORMAL,       NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_AD3,         GMI,    NORMAL,       NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_AD8,         GMI,    PULL_DOWN,    NORMAL,    OUTPUT),
+	DEFAULT_PINMUX(GMI_ADV_N,       GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_CLK,         GMI,    PULL_DOWN,    NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GMI_CS0_N,       GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_CS2_N,       GMI,    PULL_DOWN,    NORMAL,    OUTPUT),
@@ -224,6 +222,7 @@ static __initdata struct tegra_pingroup_config roth_pinmux_set_nontristate[] = {
 	DEFAULT_PINMUX(GMI_CS4_N,       GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_CS7_N,       GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_DQS_P,       GMI,    PULL_UP,      NORMAL,    INPUT),
+	DEFAULT_PINMUX(GMI_IORDY,       GMI,    PULL_UP,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GMI_WP_N,        GMI,    PULL_UP,      NORMAL,    INPUT),
 
 	DEFAULT_PINMUX(SDMMC1_WP_N,     SPI4,   PULL_UP,      NORMAL,    OUTPUT),
@@ -238,7 +237,6 @@ static __initdata struct tegra_pingroup_config roth_pinmux_set_nontristate[] = {
 	DEFAULT_PINMUX(KB_ROW6,         KBC,    PULL_DOWN,    NORMAL,    INPUT),
 
 	DEFAULT_PINMUX(CLK3_REQ,        RSVD3,  NORMAL,      NORMAL,    OUTPUT),
-	DEFAULT_PINMUX(GPIO_PU2,        RSVD,   PULL_UP,     NORMAL,    INPUT),
 	DEFAULT_PINMUX(GPIO_PU4,        RSVD3,  NORMAL,      NORMAL,    OUTPUT),
 	DEFAULT_PINMUX(GPIO_PU5,        RSVD3,  NORMAL,      NORMAL,    INPUT),
 	DEFAULT_PINMUX(GPIO_PU6,        RSVD3,  NORMAL,      NORMAL,    INPUT),

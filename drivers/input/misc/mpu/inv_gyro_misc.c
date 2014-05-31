@@ -1,6 +1,5 @@
 /*
 * Copyright (C) 2012 Invensense, Inc.
-* Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
 *
 * This software is licensed under the terms of the GNU General Public
 * License version 2, as published by the Free Software Foundation, and
@@ -70,18 +69,18 @@
 #define DEF_ACCEL_ST_SHIFT_MIN      (300)
 #define DEF_ACCEL_ST_SHIFT_MAX      (950)
 
-#define DEF_ACCEL_ST_SHIFT_DELTA    (500)
-#define DEF_GYRO_CT_SHIFT_DELTA     (500)
+#define DEF_ACCEL_ST_SHIFT_DELTA    (140)
+#define DEF_GYRO_CT_SHIFT_DELTA     (140)
 /* gyroscope Coriolis self test min and max bias shift (dps) */
 #define DEF_GYRO_CT_SHIFT_MIN       (10)
 #define DEF_GYRO_CT_SHIFT_MAX       (105)
 
 static struct test_setup_t test_setup = {
-	.gyro_sens	= 32768 / 250,
-	.sample_rate	= DEF_SELFTEST_SAMPLE_RATE,
-	.lpf		= DEF_SELFTEST_LPF_PARA,
-	.gyro_fsr	= DEF_SELFTEST_GYRO_FULL_SCALE,
-	.accl_fsr	= DEF_SELFTEST_ACCL_FULL_SCALE
+	.gyro_sens   = 32768 / 250,
+	.sample_rate = DEF_SELFTEST_SAMPLE_RATE,
+	.lpf         = DEF_SELFTEST_LPF_PARA,
+	.fsr         = DEF_SELFTEST_GYRO_FULL_SCALE,
+	.accl_fs     = DEF_SELFTEST_ACCL_FULL_SCALE
 };
 
 /* NOTE: product entries are in chronological order */
@@ -297,57 +296,6 @@ int mpu_memory_read(struct i2c_adapter *i2c_adap,
 	return 0;
 }
 
-int mpu_memory_read_6500(struct inv_gyro_state_s *st, u8 mpu_addr, u16 mem_addr,
-			 u32 len, u8 *data)
-{
-	u8 bank[2];
-	u8 addr[2];
-	u8 buf;
-
-	struct i2c_msg msgs[4];
-	int res;
-
-	if (!data || !st)
-		return -EINVAL;
-
-	bank[0] = REG_BANK_SEL;
-	bank[1] = mem_addr >> 8;
-
-	addr[0] = REG_MEM_START;
-	addr[1] = mem_addr & 0xFF;
-
-	buf = REG_MEM_RW;
-
-	/* write message */
-	msgs[0].addr = mpu_addr;
-	msgs[0].flags = 0;
-	msgs[0].buf = bank;
-	msgs[0].len = sizeof(bank);
-
-	msgs[1].addr = mpu_addr;
-	msgs[1].flags = 0;
-	msgs[1].buf = addr;
-	msgs[1].len = sizeof(addr);
-
-	msgs[2].addr = mpu_addr;
-	msgs[2].flags = 0;
-	msgs[2].buf = &buf;
-	msgs[2].len = 1;
-
-	msgs[3].addr = mpu_addr;
-	msgs[3].flags = I2C_M_RD;
-	msgs[3].buf = data;
-	msgs[3].len = len;
-
-	res = i2c_transfer(st->sl_handle, msgs, 4);
-	if (res != 4) {
-		if (res >= 0)
-			res = -EIO;
-	} else
-		res = 0;
-	return res;
-}
-
 /**
  *  @internal
  *  @brief  Inverse lookup of the index of an MPL product key .
@@ -364,34 +312,6 @@ static short index_of_key(unsigned short key)
 			return (short)i;
 
 	return -1;
-}
-
-int inv_get_silicon_rev_mpu6500(struct inv_gyro_state_s *st)
-{
-	struct inv_chip_info_s *chip_info = &st->chip_info;
-	int result;
-	u8 sw_rev;
-
-	/*memory read need more time after power up */
-	msleep(POWER_UP_TIME);
-	result = mpu_memory_read_6500(st, st->i2c_addr,
-			MPU6500_MEM_REV_ADDR, 1, &sw_rev);
-	if (sw_rev == 0) {
-		pr_warning("Rev 0 of MPU6500\n");
-		pr_warning("can't sit with other devices in same I2C bus\n");
-	}
-	if (result)
-		return result;
-
-	/* these values are place holders and not real values */
-	chip_info->product_id = MPU6500_PRODUCT_REVISION;
-	chip_info->product_revision = MPU6500_PRODUCT_REVISION;
-	chip_info->silicon_revision = MPU6500_PRODUCT_REVISION;
-	chip_info->software_revision = sw_rev;
-	chip_info->gyro_sens_trim = DEFAULT_GYRO_TRIM;
-	chip_info->accl_sens_trim = DEFAULT_ACCL_TRIM;
-	chip_info->multi = 1;
-	return 0;
 }
 
 int inv_get_silicon_rev_mpu6050(struct inv_gyro_state_s *st)
@@ -642,7 +562,7 @@ static int inv_check_6050_gyro_self_test(struct inv_gyro_state_s *st,
 		}
 	}
 	for (i = 0; i < 3; i++) {
-		if (abs(reg_avg[i]) > 20*2*1000*131)
+		if (abs(reg_avg[i])*4 > 20*2*1000*131)
 			ret_val |= (1<<i);
 	}
 	return ret_val;
@@ -662,47 +582,55 @@ static int inv_do_test(struct inv_gyro_state_s *st, int self_test_flag,
 	reg = st->reg;
 	has_accl = (st->chip_type != INV_ITG3500);
 	packet_size = 6 + 6 * has_accl;
-
-	result = nvi_pm_wr(st, INV_CLK_PLL, 0, 0);
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_1, INV_CLK_PLL);
 	if (result)
 		return result;
 
-	mdelay(POWER_UP_TIME << 1);
-	result = nvi_int_enable_wr(st, false);
+	mdelay(POWER_UP_TIME);
+	result = inv_i2c_single_write(st, reg->pwr_mgmt_2, 0);
+	if (result)
+		return result;
+
+	mdelay(POWER_UP_TIME);
+	result = inv_i2c_single_write(st, reg->int_enable, 0);
 	if (result)
 		return result;
 
 	/* disable the sensor output to FIFO */
+	result = inv_i2c_single_write(st, reg->fifo_en, 0);
+	if (result)
+		return result;
+
 	/* disable fifo reading */
-	result = nvi_user_ctrl_en(st, false, false);
+	result = inv_i2c_single_write(st, reg->user_ctrl, 0);
 	if (result)
 		return result;
 
 	/* clear FIFO */
-	result = nvi_user_ctrl_reset_wr(st, st->hw.user_ctrl |
-					st->reg->fifo_reset);
+	result = inv_i2c_single_write(st, reg->user_ctrl, BIT_FIFO_RST);
 	if (result)
 		return result;
 
 	mdelay(15);
 	/* setup parameters */
-	result = nvi_config_wr(st, test_setup.lpf);
-	if (result < 0)
-		return result;
-
-	result = nvi_smplrt_div_wr(st, test_setup.sample_rate);
+	result = inv_i2c_single_write(st, reg->lpf, test_setup.lpf);
 	if (result)
 		return result;
 
-	result = nvi_gyro_config_wr(st, (self_test_flag >> 5),
-				    (test_setup.gyro_fsr >> 3));
-	if (result < 0)
+	result = inv_i2c_single_write(st, reg->sample_rate_div,
+		test_setup.sample_rate);
+	if (result)
+		return result;
+
+	result = inv_i2c_single_write(st, reg->gyro_config,
+		self_test_flag | test_setup.fsr);
+	if (result)
 		return result;
 
 	if (has_accl) {
-		result = nvi_accel_config_wr(st, (self_test_flag >> 5),
-					     (test_setup.accl_fsr >> 3), 0);
-		if (result < 0)
+		result = inv_i2c_single_write(st, reg->accl_config,
+			self_test_flag | test_setup.accl_fs);
+		if (result)
 			return result;
 	}
 
@@ -710,18 +638,19 @@ static int inv_do_test(struct inv_gyro_state_s *st, int self_test_flag,
 	if (self_test_flag)
 		mdelay(200);
 	/* enable FIFO reading */
-	result = nvi_user_ctrl_en_wr(st, st->hw.user_ctrl | BIT_FIFO_EN);
+	result = inv_i2c_single_write(st, reg->user_ctrl, BIT_FIFO_EN);
 	if (result)
 		return result;
 
 	/* enable sensor output to FIFO */
-	result = nvi_fifo_en_wr(st, BITS_GYRO_OUT | (has_accl << 3));
+	result = inv_i2c_single_write(st, reg->fifo_en, BITS_GYRO_OUT
+		| (has_accl << 3));
 	if (result)
 		return result;
 
 	mdelay(DEF_GYRO_WAIT_TIME);
 	/* stop sending data to FIFO */
-	result = nvi_fifo_en_wr(st, 0);
+	result = inv_i2c_single_write(st, reg->fifo_en, 0);
 	if (result)
 		return result;
 
@@ -774,9 +703,7 @@ static int inv_do_test(struct inv_gyro_state_s *st, int self_test_flag,
 		accl_result[2] =
 			accl_result[2] * DEF_GYRO_PRECISION / packet_count;
 	}
-	result = inv_i2c_read(st, st->reg->temperature, 2, data);
-	if (!result)
-		nvi_report_temp(st, data, nvi_ts_ns());
+
 	return 0;
 }
 
@@ -785,21 +712,116 @@ static int inv_do_test(struct inv_gyro_state_s *st, int self_test_flag,
  */
 static void inv_recover_setting(struct inv_gyro_state_s *st)
 {
-	unsigned char enable;
-	unsigned char fifo_enable;
+	struct inv_reg_map_s *reg;
+	int data;
 
-	nvi_accel_config_wr(st, 0, st->chip_config.accl_fsr, 0);
-	nvi_gyro_config_wr(st, 0, st->chip_config.gyro_fsr);
-	enable = st->chip_config.accl_enable;
-	fifo_enable = st->chip_config.accl_fifo_enable;
-	st->chip_config.accl_enable ^= 7;
-	st->chip_config.accl_fifo_enable ^= 7;
-	nvi_accl_enable(st, enable, fifo_enable);
-	enable = st->chip_config.gyro_enable;
-	fifo_enable = st->chip_config.gyro_fifo_enable;
-	st->chip_config.gyro_enable ^= 7;
-	st->chip_config.gyro_fifo_enable ^= 7;
-	nvi_gyro_enable(st, enable, fifo_enable);
+	reg = st->reg;
+	set_inv_enable(st, st->chip_config.enable);
+	inv_i2c_single_write(st, reg->gyro_config, st->chip_config.fsr<<3);
+	inv_i2c_single_write(st, reg->lpf, st->chip_config.lpf);
+	data = ONE_K_HZ/st->chip_config.fifo_rate - 1;
+	inv_i2c_single_write(st, reg->sample_rate_div, data);
+	if (INV_ITG3500 != st->chip_type) {
+		inv_i2c_single_write(st, reg->accl_config,
+			(st->chip_config.accl_fs << 3)|0);
+	}
+	if (st->chip_config.is_asleep)
+		inv_set_power_state(st, 0);
+	else
+		inv_set_power_state(st, 1);
+}
+
+static int inv_check_compass_self_test(struct inv_gyro_state_s *st)
+{
+	int result;
+	unsigned char data[6];
+	unsigned char counter, cntl;
+	short x, y, z;
+	unsigned char *sens;
+
+	sens = st->chip_info.compass_sens;
+	/*set to bypass mode */
+	result = inv_i2c_single_write(st, REG_INT_PIN_CFG, BIT_BYPASS_EN);
+	if (result) {
+		inv_i2c_single_write(st, REG_INT_PIN_CFG, 0x0);
+		return result;
+	}
+
+	/*set to power down mode */
+	result = inv_secondary_write(REG_AKM_MODE, DATA_AKM_MODE_PW_DN);
+	if (result)
+		goto AKM_fail;
+
+	/*write 1 to ASTC register */
+	result = inv_secondary_write(REG_AKM_ST_CTRL, DATA_AKM_SELF_TEST);
+	if (result)
+		goto AKM_fail;
+
+	/*set self test mode */
+	result = inv_secondary_write(REG_AKM_MODE, DATA_AKM_MODE_PW_ST);
+	if (result)
+		goto AKM_fail;
+
+	counter = 10;
+	while (counter > 0) {
+		mdelay(10);
+		result = inv_secondary_read(REG_AKM_STATUS, 1, data);
+		if (result)
+			goto AKM_fail;
+
+		if (data[0] != DATA_AKM_DRDY)
+			counter--;
+		else
+			counter = 0;
+	}
+
+	if (data[0] != DATA_AKM_DRDY) {
+		result = -1;
+		goto AKM_fail;
+	}
+
+	result = inv_secondary_read(REG_AKM_MEASURE_DATA, 6, data);
+	if (result)
+		goto AKM_fail;
+
+	x = (short)((data[1]<<8) | data[0]);
+	y = (short)((data[3]<<8) | data[2]);
+	z = (short)((data[5]<<8) | data[4]);
+	x = ((x * (sens[0] + 128)) >> 8);
+	y = ((y * (sens[1] + 128)) >> 8);
+	z = ((z * (sens[2] + 128)) >> 8);
+	if (COMPASS_ID_AK8963 == st->plat_data.sec_slave_id) {
+		result = inv_secondary_read(REG_AKM8963_CNTL1, 1, &cntl);
+		if (result)
+			goto AKM_fail;
+
+		if (0 == (cntl & DATA_AKM8963_BIT)) {
+			x <<= 2;
+			y <<= 2;
+			z <<= 2;
+		}
+	}
+
+	result = 1;
+	result = inv_secondary_read(REG_AKM8963_CNTL1, 1, &cntl);
+	if (x > st->compass_st_upper[0] || x < st->compass_st_lower[0])
+		goto AKM_fail;
+
+	if (y > st->compass_st_upper[1] || y < st->compass_st_lower[1])
+		goto AKM_fail;
+
+	if (z > st->compass_st_upper[2] || z < st->compass_st_lower[2])
+		goto AKM_fail;
+
+	result = 0;
+AKM_fail:
+	/*write 0 to ASTC register */
+	result |= inv_secondary_write(REG_AKM_ST_CTRL, 0);
+	/*set to power down mode */
+	result |= inv_secondary_write(REG_AKM_MODE, DATA_AKM_MODE_PW_DN);
+	/*restore to non-bypass mode */
+	result |= inv_i2c_single_write(st, REG_INT_PIN_CFG, 0x0);
+	return result;
 }
 
 /**
@@ -812,13 +834,13 @@ int inv_hw_self_test(struct inv_gyro_state_s *st,
 	int gyro_bias_st[3];
 	int accl_bias_st[3], accl_bias_regular[3];
 	int test_times;
-	char accel_result, gyro_result;
+	char compass_result, accel_result, gyro_result;
 
-	accel_result = gyro_result = 0;
+	compass_result = accel_result = gyro_result = 0;
 	test_times = 2;
 	while (test_times > 0) {
-		result = inv_do_test(st, 0, gyro_bias_regular,
-				     accl_bias_regular);
+		result = inv_do_test(st, 0,  gyro_bias_regular,
+			accl_bias_regular);
 		if (result == -EAGAIN)
 			test_times--;
 		else
@@ -830,7 +852,7 @@ int inv_hw_self_test(struct inv_gyro_state_s *st,
 	test_times = 2;
 	while (test_times > 0) {
 		result = inv_do_test(st, BITS_SELF_TEST_EN, gyro_bias_st,
-				     accl_bias_st);
+					accl_bias_st);
 		if (result == -EAGAIN)
 			test_times--;
 		else
@@ -841,16 +863,18 @@ int inv_hw_self_test(struct inv_gyro_state_s *st,
 
 	if (st->chip_type == INV_ITG3500) {
 		gyro_result = !inv_check_3500_gyro_self_test(st,
-					      gyro_bias_regular, gyro_bias_st);
+			gyro_bias_regular, gyro_bias_st);
 	} else {
+		if (st->has_compass)
+			compass_result = !inv_check_compass_self_test(st);
 		accel_result = !inv_check_accl_self_test(st,
-					      accl_bias_regular, accl_bias_st);
+			accl_bias_regular, accl_bias_st);
 		gyro_result = !inv_check_6050_gyro_self_test(st,
-					      gyro_bias_regular, gyro_bias_st);
+			gyro_bias_regular, gyro_bias_st);
 	}
 test_fail:
 	inv_recover_setting(st);
-	return (accel_result << 1) | gyro_result;
+	return (compass_result<<2) | (accel_result<<1) | gyro_result;
 }
 
 /**
@@ -1493,6 +1517,9 @@ ssize_t inv_dmp_firmware_write(struct file *fp, struct kobject *kobj,
 	struct inv_reg_map_s *reg;
 
 	st = dev_get_drvdata(container_of(kobj, struct device, kobj));
+	if (st->chip_config.is_asleep)
+		return -EPERM;
+
 	if (1 == st->chip_config.firmware_loaded)
 		return -EINVAL;
 

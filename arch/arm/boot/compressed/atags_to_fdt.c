@@ -95,6 +95,20 @@ int atags_to_fdt(void *atag_list, void *fdt, int total_space)
 			serial[1] = cpu_to_fdt32(atag->u.serialnr.low);
 			setprop(fdt, "/", "serial-num", serial, 8);
 		}
+#ifdef CONFIG_MACH_ENDEAVORU
+		  else if (atag->hdr.tag == ATAG_ALS) {
+			unsigned int als_kadc = atag->u.als_kadc.kadc;
+			setprop_cell(fdt, "/", "als-calibration", als_kadc);
+		} else if (atag->hdr.tag == ATAG_PS) {
+			unsigned int ps_kparam1 = atag->u.serialnr.low;
+			unsigned int ps_kparam2 = atag->u.serialnr.high;
+			setprop_cell(fdt, "/", "proximity-calib-low", ps_kparam1);
+			setprop_cell(fdt, "/", "proximity-calib-high", ps_kparam2);
+		} else if (atag->hdr.tag == ATAG_PS_TYPE) {
+			unsigned int ps_type = atag->u.revision.rev;
+			setprop_cell(fdt, "/", "psensor-type", ps_type);
+		}
+#endif
 	}
 
 	if (memcount)

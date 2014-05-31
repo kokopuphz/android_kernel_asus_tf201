@@ -5,7 +5,7 @@
  * Copyright (C) 2003-2004 Robert Schwebel, Benedikt Spranger
  * Copyright (C) 2008 Nokia Corporation
  * Copyright (C) 2009 Samsung Electronics
- *                    Author: Michal Nazarewicz (mina86@mina86.com)
+ *                    Author: Michal Nazarewicz (m.nazarewicz@samsung.com)
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,7 +17,7 @@
 
 #include <linux/slab.h>
 #include <linux/kernel.h>
-#include <linux/device.h>
+#include <linux/platform_device.h>
 #include <linux/etherdevice.h>
 
 #include <linux/atomic.h>
@@ -76,8 +76,11 @@ struct f_rndis {
 	int				config;
 
 	struct usb_ep			*notify;
+	struct usb_endpoint_descriptor	*notify_desc;
 	struct usb_request		*notify_req;
 	atomic_t			notify_count;
+
+	atomic_t			online;
 };
 
 static inline struct f_rndis *func_to_rndis(struct usb_function *f)
@@ -103,7 +106,6 @@ static unsigned int bitrate(struct usb_gadget *g)
 
 #define LOG2_STATUS_INTERVAL_MSEC	5	/* 1 << 5 == 32 msec */
 #define STATUS_BYTECOUNT		8	/* 8 bytes data */
-
 
 /* interface descriptor: */
 
@@ -172,12 +174,11 @@ static struct usb_interface_assoc_descriptor
 rndis_iad_descriptor = {
 	.bLength =		sizeof rndis_iad_descriptor,
 	.bDescriptorType =	USB_DT_INTERFACE_ASSOCIATION,
-
 	.bFirstInterface =	0, /* XXX, hardcoded */
 	.bInterfaceCount = 	2,	// control + data
 	.bFunctionClass =	USB_CLASS_COMM,
 	.bFunctionSubClass =	USB_CDC_SUBCLASS_ETHERNET,
-	.bFunctionProtocol =	USB_CDC_PROTO_NONE,
+	.bFunctionProtocol =	USB_CDC_ACM_PROTO_VENDOR,
 	/* .iFunction = DYNAMIC */
 };
 
@@ -383,6 +384,7 @@ static void rndis_response_available(void *_rndis)
 {
 	struct f_rndis			*rndis = _rndis;
 	struct usb_request		*req = rndis->notify_req;
+
 	__le32				*data = req->buf;
 	int				status;
 
@@ -408,7 +410,14 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct f_rndis			*rndis = req->context;
 	int				status = req->status;
-
+	if (rndis == NULL) {
+		pr_warning("[USB] %s: usb rndis is null\n", __func__);
+		return;
+	}
+	if (!atomic_read(&rndis->online)) {
+		pr_warning("%s: usb rndis is not online\n", __func__);
+		return;
+	}
 	/* after TX:
 	 *  - USB_CDC_GET_ENCAPSULATED_RESPONSE (ep0/control)
 	 *  - RNDIS_RESPONSE_AVAILABLE (status/irq)
@@ -420,7 +429,7 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 		atomic_set(&rndis->notify_count, 0);
 		break;
 	default:
-		pr_err("RNDIS %s response error %d, %d/%d\n",
+		pr_err("[USB] RNDIS %s response error %d, %d/%d\n",
 			ep->name, status,
 			req->actual, req->length);
 		/* FALLTHROUGH */
@@ -436,7 +445,7 @@ static void rndis_response_complete(struct usb_ep *ep, struct usb_request *req)
 		status = usb_ep_queue(rndis->notify, req, GFP_ATOMIC);
 		if (status) {
 			atomic_dec(&rndis->notify_count);
-			pr_err("notify/1 --> %d\n", status);
+			pr_debug("[USB] notify/1 --> %d\n", status);
 		}
 		break;
 	}
@@ -447,11 +456,21 @@ static void rndis_command_complete(struct usb_ep *ep, struct usb_request *req)
 	struct f_rndis			*rndis = req->context;
 	int				status;
 
+	if (req->status < 0) {
+		pr_err("%s: staus error: %d\n", __func__, req->status);
+		return;
+	}
+
+	if (!atomic_read(&rndis->online)) {
+		pr_warning("%s: usb rndis is not online\n", __func__);
+		return;
+	}
+
 	/* received RNDIS command from USB_CDC_SEND_ENCAPSULATED_COMMAND */
 //	spin_lock(&dev->lock);
 	status = rndis_msg_parser(rndis->config, (u8 *) req->buf);
 	if (status < 0)
-		pr_err("RNDIS command error %d, %d/%d\n",
+		pr_warning("[USB] RNDIS command error %d, %d/%d\n",
 			status, req->actual, req->length);
 //	spin_unlock(&dev->lock);
 }
@@ -466,6 +485,11 @@ rndis_setup(struct usb_function *f, const struct usb_ctrlrequest *ctrl)
 	u16			w_index = le16_to_cpu(ctrl->wIndex);
 	u16			w_value = le16_to_cpu(ctrl->wValue);
 	u16			w_length = le16_to_cpu(ctrl->wLength);
+
+	if (!atomic_read(&rndis->online)) {
+		pr_warning("%s: usb rndis is not online\n", __func__);
+		return -ENOTCONN;
+	}
 
 	/* composite driver infrastructure handles everything except
 	 * CDC class messages; interface activation uses set_alt().
@@ -598,6 +622,7 @@ static int rndis_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	} else
 		goto fail;
 
+	atomic_set(&rndis->online, 1);
 	return 0;
 fail:
 	return -EINVAL;
@@ -607,6 +632,8 @@ static void rndis_disable(struct usb_function *f)
 {
 	struct f_rndis		*rndis = func_to_rndis(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
+
+	atomic_set(&rndis->online, 0);
 
 	if (!rndis->notify->driver_data)
 		return;
@@ -687,12 +714,14 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	ep = usb_ep_autoconfig(cdev->gadget, &fs_in_desc);
 	if (!ep)
 		goto fail;
+	ep->desc =NULL;
 	rndis->port.in_ep = ep;
 	ep->driver_data = cdev;	/* claim */
 
 	ep = usb_ep_autoconfig(cdev->gadget, &fs_out_desc);
 	if (!ep)
 		goto fail;
+	ep->desc =NULL;
 	rndis->port.out_ep = ep;
 	ep->driver_data = cdev;	/* claim */
 
@@ -703,6 +732,7 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	ep = usb_ep_autoconfig(cdev->gadget, &fs_notify_desc);
 	if (!ep)
 		goto fail;
+	ep->desc =NULL;
 	rndis->notify = ep;
 	ep->driver_data = cdev;	/* claim */
 
@@ -767,16 +797,15 @@ rndis_bind(struct usb_configuration *c, struct usb_function *f)
 	rndis_set_param_medium(rndis->config, NDIS_MEDIUM_802_3, 0);
 	rndis_set_host_mac(rndis->config, rndis->ethaddr);
 
-	if (rndis->manufacturer && rndis->vendorID &&
-			rndis_set_param_vendor(rndis->config, rndis->vendorID,
-					       rndis->manufacturer))
-		goto fail;
+	if (rndis_set_param_vendor(rndis->config, rndis->vendorID,
+				   rndis->manufacturer))
+			goto fail;
 
+	network_pm_qos_update_latency(1);
 	/* NOTE:  all that is done without knowing or caring about
 	 * the network link ... which is unavailable to this code
 	 * until we're activated via set_alt().
 	 */
-
 	DBG(cdev, "RNDIS: %s speed IN/%s OUT/%s NOTIFY/%s\n",
 			gadget_is_superspeed(c->cdev->gadget) ? "super" :
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
@@ -800,9 +829,9 @@ fail:
 	/* we might as well release our claims on endpoints */
 	if (rndis->notify)
 		rndis->notify->driver_data = NULL;
-	if (rndis->port.out_ep->desc)
+	if (rndis->port.out_ep)
 		rndis->port.out_ep->driver_data = NULL;
-	if (rndis->port.in_ep->desc)
+	if (rndis->port.in_ep)
 		rndis->port.in_ep->driver_data = NULL;
 
 	ERROR(cdev, "%s: can't bind, err %d\n", f->name, status);
@@ -815,11 +844,14 @@ rndis_unbind(struct usb_configuration *c, struct usb_function *f)
 {
 	struct f_rndis		*rndis = func_to_rndis(f);
 
+	network_pm_qos_update_latency(0);
+
 	rndis_deregister(rndis->config);
 	rndis_exit();
 
 	if (gadget_is_superspeed(c->cdev->gadget))
 		usb_free_descriptors(f->ss_descriptors);
+
 	if (gadget_is_dualspeed(c->cdev->gadget))
 		usb_free_descriptors(f->hs_descriptors);
 	usb_free_descriptors(f->descriptors);
@@ -850,13 +882,7 @@ static inline bool can_support_rndis(struct usb_configuration *c)
  * for calling @gether_cleanup() before module unload.
  */
 int
-rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN])
-{
-	return rndis_bind_config_vendor(c, ethaddr, 0, NULL);
-}
-
-int
-rndis_bind_config_vendor(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
+rndis_bind_config(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
 				u32 vendorID, const char *manufacturer)
 {
 	struct f_rndis	*rndis;
@@ -865,13 +891,13 @@ rndis_bind_config_vendor(struct usb_configuration *c, u8 ethaddr[ETH_ALEN],
 	if (!can_support_rndis(c) || !ethaddr)
 		return -EINVAL;
 
-	/* setup RNDIS itself */
-	status = rndis_init();
-	if (status < 0)
-		return status;
-
 	/* maybe allocate device-global string IDs */
 	if (rndis_string_defs[0].id == 0) {
+
+		/* ... and setup RNDIS itself */
+		status = rndis_init();
+		if (status < 0)
+			return status;
 
 		/* control interface label */
 		status = usb_string_id(c->cdev);

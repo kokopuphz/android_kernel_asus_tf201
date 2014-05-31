@@ -20,9 +20,8 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/module.h>
-
 #include <media/ov5650.h>
-#include <video/tegra_camera.h>
+#include <media/tegra_camera.h>
 
 #define SIZEOF_I2C_TRANSBUF 32
 
@@ -1131,7 +1130,7 @@ static int ov5650_set_group_hold(struct ov5650_info *info, struct ov5650_ae *ae)
 static int ov5650_set_binning(struct ov5650_info *info, u8 enable)
 {
 	s32 ret;
-	u8  array_ctrl_reg, analog_ctrl_reg, timing_reg;
+	u8  array_ctrl_reg = 0, analog_ctrl_reg = 0, timing_reg = 0;
 	u32 val;
 
 	if (info->mode == OV5650_MODE_2592x1944
@@ -1254,18 +1253,18 @@ static int ov5650_test_pattern(struct ov5650_info *info,
 }
 
 static int set_power_helper(struct ov5650_platform_data *pdata,
-			struct device *dev, int powerLevel, int *ref_cnt)
+				int powerLevel, int *ref_cnt)
 {
 	if (pdata) {
 		if (powerLevel && pdata->power_on) {
 			if (*ref_cnt == 0)
-				pdata->power_on(dev);
+				pdata->power_on();
 			*ref_cnt = *ref_cnt + 1;
 		}
 		else if (pdata->power_off) {
 			*ref_cnt = *ref_cnt - 1;
 			if (*ref_cnt <= 0)
-				pdata->power_off(dev);
+				pdata->power_off();
 		}
 	}
 	return 0;
@@ -1278,15 +1277,15 @@ static int ov5650_set_power(struct ov5650_info *info, int powerLevel)
 
 	if (StereoCameraMode_Left & info->camera_mode) {
 		mutex_lock(&info->mutex_le);
-		set_power_helper(info->left.pdata, &info->left.i2c_client->dev,
-			powerLevel, &info->power_refcnt_le);
+		set_power_helper(info->left.pdata, powerLevel,
+			&info->power_refcnt_le);
 		mutex_unlock(&info->mutex_le);
 	}
 
 	if (StereoCameraMode_Right & info->camera_mode) {
 		mutex_lock(&info->mutex_ri);
-		set_power_helper(info->right.pdata, &info->right.i2c_client->dev,
-			powerLevel, &info->power_refcnt_ri);
+		set_power_helper(info->right.pdata, powerLevel,
+			&info->power_refcnt_ri);
 		mutex_unlock(&info->mutex_ri);
 	}
 
@@ -1297,7 +1296,7 @@ static int ov5650_get_sensor_id(struct ov5650_info *info)
 {
 	int ret = 0;
 	int i;
-	u8  bak;
+	u8  bak = 0;
 
 	pr_info("%s\n", __func__);
 	if (info->sensor_data.fuse_id_size)

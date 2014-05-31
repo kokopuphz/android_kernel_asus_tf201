@@ -1,0 +1,1253 @@
+/dts-v1/;
+
+/include/ "tegra30.dtsi"
+
+/**
+ * This file contains DeviceTree entry for production version of X3.
+ * May contain portions of code from EternityProject DT for ENR#U.
+ *
+ * Used symbols:
+ * *M*: MUX
+ * *P*: PULL
+ * *S*: STATE
+ * *L*: LOCK
+ * *D*: DRAIN
+ *
+ * NC: Not Classified
+ * TP: Test Point
+ * EPH: External pull high
+ * EPD: External pull down
+ * (I): Input ONLY
+ *
+ * Copyright (C) 2013, EternityProject Development
+ * Angelo G. Del Regno <kholk11@gmail.com>
+ */
+
+/* [TODO] Define:
+ * 1. Sensors (Proximity, ambient light, accelerometer)
+ * 2. Regulators
+ * 3. Power rails of regulator
+ * 4. What about physical buttons? (PWR, VOLUP, VOLDN)
+ */
+
+/ {
+	model = "EternityProject Tegra30 X3 Phone";
+	compatible = "nvidia,x3", "nvidia,tegra30";
+
+	memory {
+		reg = <0x80000000 0x80000000>;
+	};
+
+	pinmux {
+		pinctrl-names = "default";
+		pinctrl-0 = <&state_default>;
+
+		state_default: pinmux {
+
+			/* I2C MUX */
+			gen1_i2c_scl_pc4 {
+				nvidia,pins =	"gen1_i2c_scl_pc4",	/* UNKNOWN           */
+						"gen1_i2c_sda_pc5";	/* UNKNOWN           */
+				nvidia,function = "i2c1";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;			/* NORMAL     *S*/
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;			/* UNLOCKED   *L*/
+				nvidia,open-drain = <0>;		/* DISABLED   *D*/
+			};
+
+			gen2_i2c_scl_pt5 {
+				nvidia,pins =	"gen2_i2c_scl_pt5",	/* MUIC_INIT         */
+						"gen2_i2c_sda_pt6";	/* MUIC_INIT         */
+				nvidia,function = "i2c2";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,open-drain = <0>;
+			};
+
+			cam_i2c_scl_pbb1 {
+				nvidia,pins =	"cam_i2c_scl_pbb1",	/* CAM_I2C_SCL       */
+						"cam_i2c_sda_pbb2";	/* CAM_I2C_SDA       */
+				nvidia,function = "i2c3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,open-drain = <0>;
+			};
+
+			ddc_scl_pv4 {
+				nvidia,pins =	"ddc_scl_pv4",		/* HDMI_EDID         */
+						"ddc_sda_pv5";		/* HDMI_EDID         */
+				nvidia,function = "i2c4";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,open-drain = <0>;
+			};
+
+			pwr_i2c_scl_pz6 {
+				nvidia,pins =	"pwr_i2c_scl_pz6",	/* UNKNOWN           */
+						"pwr_i2c_sda_pz7";	/* UNKNOWN           */
+				nvidia,function = "i2cpwr";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,open-drain = <0>;
+			};
+
+			/* 32k clock OUT: !!NC!! */
+			clk_32k_out_pa0 {
+				nvidia,pins = "clk_32k_out_pa0";	/* UNKNOWN           */
+				nvidia,function = "blink";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>; /* Why the hell?! */
+			};
+
+			/* SDMMC3: TI WL1283 SDIO */
+			sdmmc3_clk_pa6 {
+				nvidia,pins = "sdmmc3_clk_pa6";		/* MICROSD_CLK       */
+				nvidia,function = "sdmmc3";		/* SDMMC3 MUX *M*/
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			sdmmc3_cmd_pa7 {
+				nvidia,pins =	"sdmmc3_cmd_pa7",	/* MICROSD_CMD       */
+						"sdmmc3_dat0_pb7",	/* MICROSD_DAT0      */
+						"sdmmc3_dat1_pb6",	/* MICROSD_DAT1      */
+						"sdmmc3_dat2_pb5",	/* MICROSD_DAT2      */
+						"sdmmc3_dat3_pb4";	/* MICROSD_DAT3      */
+				nvidia,function = "sdmmc3";		/* SDMMC3 MUX *M*/
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* SDMMC4: EMMC */
+			sdmmc4_clk_pcc4 {
+				nvidia,pins =	"sdmmc4_clk_pcc4";	/* eMMC_CLK          */
+				nvidia,function = "sdmmc4";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			sdmmc4_rst_n_pcc3 {
+				nvidia,pins =	"sdmmc4_rst_n_pcc3";	/* eMMC_RST_N        */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <1>;			/* PULL_DOWN  *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			sdmmc4_cmd_pt7 {
+				nvidia,pins =	"sdmmc4_cmd_pt7",	/* eMMC_CMD          */
+						"sdmmc4_dat0_paa0",	/* eMMC_DAT0         */
+						"sdmmc4_dat1_paa1",	/* eMMC_DAT1         */
+						"sdmmc4_dat2_paa2",	/* eMMC_DAT2         */
+						"sdmmc4_dat3_paa3",	/* eMMC_DAT3         */
+						"sdmmc4_dat4_paa4",	/* eMMC_DAT4         */
+						"sdmmc4_dat5_paa5",	/* eMMC_DAT5         */
+						"sdmmc4_dat6_paa6",	/* eMMC_DAT6         */
+						"sdmmc4_dat7_paa7";	/* eMMC_DAT7         */
+				nvidia,function="sdmmc4";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* UART2: UNKNOWN */
+			uart2_txd_pc2 {
+				nvidia,pins =	"uart2_txd_pc2";	/* UNKNOWN         */
+				nvidia,function = "irda";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			uart2_rxd_pc3 {
+				nvidia,pins =	"uart2_rxd_pc3";	/* UNKNOWN         */
+				nvidia,function = "irda";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+			uart2_cts_n_pj5 {
+				nvidia,pins =	"uart2_cts_n_pj5",	/* UNKNOWN         */
+						"uart2_rts_n_pj6";	/* UNKNOWN         */
+				nvidia,function = "uartb";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* UART3: Bluetooth BCM4330 UART I/F */
+			uart3_txd_pw6 {
+				nvidia,pins =	"uart3_txd_pw6",	/* BT_RX_AP_TX     */
+						"uart3_rts_n_pc0";	/* BT_CTS_AP_RTS   */
+				nvidia,function = "uartc";		/* UARTC MUX  *M*/
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+			uart3_rxd_pw7 {
+				nvidia,pins =	"uart3_rxd_pw7",	/* BT_TX_AP_RX     */
+						"uart3_cts_n_pa1";	/* BT_RTS_AP_CTS   */
+				nvidia,function = "uartc";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* DAP1: MDM6600 INTERRUPTS???? */
+			dap1_fs_pn0 {
+				nvidia,pins =	"dap1_fs_pn0",		/* UNKNOWN          */
+						"dap1_din_pn1",		/* UNKNOWN          */
+						"dap1_dout_pn2",	/* UNKNOWN          */
+						"dap1_sclk_pn3";	/* UNKNOWN          */
+				nvidia,function = "i2s0";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* DAP2: AUDIO CODEC */
+			dap2_fs_pa2 {
+				nvidia,pins =	"dap2_fs_pa2",		/* UNKNOWN          */
+						"dap2_sclk_pa3",	/* UNKNOWN          */
+						"dap2_din_pa4",		/* UNKNOWN          */
+						"dap2_dout_pa5";	/* UNKNOWN          */
+				nvidia,function = "hda";
+				nvidia,pull = <1>;			/* PULL_DOWN  *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* DAP3: UNKNOWN */
+			dap3_fs_pp0 {
+				nvidia,pins =	"dap3_fs_pp0",		/* UNKNOWN          */
+						"dap3_din_pp1",		/* UNKNOWN          */
+						"dap3_dout_pp2",	/* UNKNOWN          */
+						"dap3_sclk_pp3";	/* UNKNOWN          */
+				nvidia,function = "i2s2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* DAP4 I2S3: Bluetooth BCM4330 PCM I/F */
+			dap4_din_pp1 {
+				nvidia,pins =	"dap4_din_pp1",		/* BT_PCM_DIN       */
+						"dap4_dout_pp6",	/* BT_PCM_DOUT      */
+						"dap4_sclk_pp3",	/* BT_PCM_CLK       */
+						"dap4_fs_pp4";		/* BT_PCM_SYNC      */
+				nvidia,function = "i2s3";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* SPDIF CONTROL */
+			spdif_out_pk5 {
+				nvidia,pins =	"spdif_out_pk5";	/* NC                */
+				nvidia,function = "spdif";
+				nvidia,pull = <2>;
+				nvidia,tristate = <1>;
+			};
+			spdif_in_pk6 {
+				nvidia,pins =	"spdif_in_pk6";		/* NC                */
+				nvidia,function = "spdif";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			/* LCD PINS: MHL, MDM6600, CAM, PANEL */
+			lcd_d0_pe0 {
+				nvidia,pins =	"lcd_d0_pe0",		/* LCD_RGB_RGB_B_2   */
+						"lcd_d1_pe1",		/* LCD_RGB_RGB_B_3   */
+						"lcd_d2_pe0",		/* LCD_RGB_RGB_B_4   */
+						"lcd_d3_pe3",		/* LCD_RGB_RGB_B_5   */
+						"lcd_d4_pe4",		/* LCD_RGB_RGB_B_6   */
+						"lcd_d5_pe5",		/* LCD_RGB_RGB_B_7   */
+						"lcd_d6_pe6",		/* LCD_RGB_RGB_G_2   */
+						"lcd_d7_pe7",		/* LCD_RGB_RGB_G_3   */
+						"lcd_d8_pf0",		/* LCD_RGB_RGB_G_4   */
+						"lcd_d9_pf1",		/* LCD_RGB_RGB_G_5   */
+						"lcd_d10_pf2",		/* LCD_RGB_RGB_G_6   */
+						"lcd_d11_pf3",		/* LCD_RGB_RGB_G_7   */
+						"lcd_d12_pf4",		/* LCD_RGB_RGB_R_2   */
+						"lcd_d13_pf5",          /* LCD_RGB_RGB_R_3   */
+						"lcd_d14_pf6",		/* LCD_RGB_RGB_R_4   */
+						"lcd_d15_pf7",		/* LCD_RGB_RGB_R_5   */
+						"lcd_d16_pm0",		/* LCD_RGB_RGB_R_6   */
+						"lcd_d17_pm1",		/* LCD_RGB_RGB_R_7   */
+						"lcd_d18_pm2",		/* LCD_RGB_RGB_B_0   */
+						"lcd_d19_pm3",		/* LCD_RGB_RGB_B_1   */
+						"lcd_d20_pm4",          /* LCD_RGB_RGB_G_0   */
+						"lcd_d21_pm5",		/* LCD_RGB_RGB_G_1   */
+						"lcd_d22_pm6",		/* LCD_RGB_RGB_R_0   */
+						"lcd_d23_pm7",		/* LCD_RGB_RGB_R_1   */
+						"lcd_pclk_pb3",		/* LCD_RGB_PCLK      */
+						"lcd_de_pj1",		/* LCD_RGB_DE        */
+						"lcd_hsync_pj3",	/* LCD_RGB_HSYNC     */
+						"lcd_vsync_pj4",	/* LCD_RGB_VSYNC     */
+						"lcd_wr_n_pz3";		/* UNKNOWN           */
+				nvidia,function = "displaya";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			lcd_m1_pw1 {
+				nvidia,pins =	"lcd_m1_pw1";		/* LCD_MAKER_ID      */
+				nvidia,function = "displaya";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <1>;			
+			};
+
+			lcd_pwr0_pb2 {
+				nvidia,pins =	"lcd_pwr0_pb2",		/* UNKNOWN           */
+						"lcd_pwr1_pc1";		/* UNKNOWN           */
+				nvidia,function = "displaya";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			lcd_sdout_pn5 {
+				nvidia,pins =	"lcd_sdout_pn5",	/* LCD_RGB_SDO       */
+						"lcd_sdin_pz2",		/* LCD_RGB_SDI       */
+						"lcd_sck_pz4",		/* LCD_RGB_SCL       */
+						"lcd_cs0_n_pn4";        /* LCD_RGB_CS        */
+				nvidia,function = "spi5";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			lcd_cs1_n_pw0 {
+				nvidia,pins =	"lcd_cs1_n_pw0";	/* LCD_RESET_N       */
+				nvidia,function = "rsvd2";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			lcd_dc0_pn6 {
+				nvidia,pins =	"lcd_dc0_pn6",		/* UNKNOWN           */
+						"lcd_dc1_pd2";		/* SENSOR_LDO_EN_2   */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			/* GMI PINS */
+			gmi_ad0_pg0 {
+				nvidia,pins =	"gmi_ad0_pg0",		/* UNKNOWN           */
+						"gmi_ad1_pg1",		/* UNKNOWN           */
+						"gmi_ad2_pg2",		/* UNKNOWN           */
+						"gmi_ad3_pg3",		/* UNKNOWN           */
+						"gmi_ad4_pg4",		/* UNKNOWN           */
+						"gmi_ad5_pg5",		/* UNKNOWN           */
+						"gmi_ad6_pg6",		/* UNKNOWN           */
+						"gmi_ad7_pg7",		/* UNKNOWN           */
+						"gmi_ad15_ph7";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_ad8_ph0 {
+				nvidia,pins =	"gmi_ad8_ph0",		/* UNKNOWN           */
+						"gmi_ad9_ph1";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <1>;			/* PULL_DOWN  *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_ad10_ph2 {
+				nvidia,pins = "gmi_ad10_ph2";		/* SENSOR_LDO_EN(AMI)*/
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+			};
+
+/*			gmi_cs0_n_pj0 {
+				nvidia,pins = "gmi_cs0_n_pj0";
+				nvidia,function = "gmi";
+				nvidia,pull = <2>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};*/
+
+			gmi_cs0_n_pj0 {
+				nvidia,pins = "gmi_cs0_n_pj0";		/* MUIC_INIT         */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_cs1_n_pj2 {
+				nvidia,pins =	"gmi_cs1_n_pj2",	/* UNKNOWN           */
+						"gmi_cs4_n_pk2";	/* PROX_AMBIENT_INT  */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_cs2_n_pk3 {
+				nvidia,pins =	"gmi_cs2_n_pk3",	/* NC                */
+						"gmi_cs3_n_pk4";        /* NC                */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			gmi_cs7_n_pi6 {
+				nvidia,pins =	"gmi_cs7_n_pi6";	/* UNKNOWN           */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+
+			gmi_ad11_ph3 {
+				nvidia,pins =	"gmi_ad11_ph3";		/* NC                */
+				nvidia,function = "pwm3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			gmi_ad12_ph4 {
+				nvidia,pins =	"gmi_ad12_ph4",		/* SENSOR_INT-MPU6050*/
+						"gmi_ad13_ph5";		/* COMPASS_READY(AMI)*/
+				nvidia,function = "rsvd2";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_ad14_ph6 {
+				nvidia,pins =	"gmi_ad14_ph6";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			gmi_a16_pj7 {
+				nvidia,pins =	"gmi_a16_pj7",		/* UNKNOWN           */
+						"gmi_a19_pk7";		/* UNKNOWN           */
+				nvidia,function = "uartd";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+			gmi_a17_pb0 {
+				nvidia,pins =	"gmi_a17_pb0";		/* UNKNOWN           */
+				nvidia,function = "uartd";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			gmi_a18_pb1 {
+				nvidia,pins =	"gmi_a18_pb1";		/* RGB_IC_EN         */
+				nvidia,function = "gmi";
+				nvidia,pull = <1>;			/* PULL_DOWN  *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			gmi_wr_n_pi0 {
+				nvidia,pins =	"gmi_wr_n_pi0";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_oe_n_pi1 {
+				nvidia,pins =	"gmi_oe_n_pi1";		/* UNKNOWN           */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_dqs_pi2 {
+				nvidia,pins =	"gmi_dqs_pi2";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_adv_n_pk0 {
+				nvidia,pins =	"gmi_adv_n_pk0",	/* UNKNOWN           */
+						"gmi_clk_pk1";		/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_wait_pi7 {
+				nvidia,pins =	"gmi_wait_pi7",		/* UNKNOWN           */
+						"gmi_rst_n_pi4";
+				nvidia,function = "gmi";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_cs6_n_pi3 {
+				nvidia,pins =	"gmi_cs6_n_pi3";	/* UNKNOWN           */
+				nvidia,function = "gmi";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_wp_n_pc7 {
+				nvidia,pins =	"gmi_wp_n_pc7";		/* POWER_KEY???      */
+				nvidia,function = "gmi";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			gmi_iordy_pi5 {
+				nvidia,pins =	"gmi_iordy_pi5";	/* SDMMC1 CD GPIO    */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;                  /* NORMAL     *S*/
+				nvidia,enable-input = <1>;
+			};
+
+			/* TEGRA KEYBOARD PINS */
+			kb_col0_pq0 {
+				nvidia,pins =	"kb_col0_pq0",		/* NC                */
+						"kb_col2_pq2",		/* TOUCH_MAKER_ID    */
+						"kb_col4_pq4",		/* NC                */
+						"kb_col5_pq5";		/* NC                */
+				nvidia,function = "kbc";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			kb_col1_pq1 {
+				nvidia,pins =	"kb_col1_pq1";		/* TOUCH_LDO_EN       */
+				nvidia,function = "kbc";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			kb_col3_pq3 {
+				nvidia,pins =	"kb_col3_pq3";		/* TOUCH_INT_N       */
+				nvidia,function = "kbc";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			/* TEGRA KEYBOARD PINS (REMAPPED) */
+			kb_row0_pr0 {
+				nvidia,pins =	"kb_row0_pr0";		/* NFC_MODE      */
+				nvidia,function = "rsvd";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;			/* TRISTATE?? *S*/
+				nvidia,enable-input = <0>;
+			};
+
+			kb_row1_pr1 {
+				nvidia,pins =	"kb_row1_pr1",		/* UNKNOWN           */
+						"kb_row8_ps0",		/* UNKNOWN           */
+						"kb_row13_ps5";		/* CP_CRASH_INT      */
+				nvidia,function = "kbc";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			kb_row2_pr2 {
+				nvidia,pins =	"kb_row2_pr2";		/* UNKNOWN           */
+				nvidia,function = "rsvd3";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			kb_row3_pr3 {
+				nvidia,pins =	"kb_row3_pr3";		/* PROXI_LDO_EN-APDS */
+				nvidia,function = "rsvd2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			kb_row4_pr4 {
+				nvidia,pins =	"kb_row4_pr4";		/* UNKNOWN           */
+				nvidia,function = "rsvd3";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			kb_row6_pr6 {
+				nvidia,pins =	"kb_row6_pr6",		/* UNKNOWN           */
+						"kb_row7_pr7",		/* UNKNOWN           */
+						"kb_row9_ps1",		/* UNKNOWN           */
+						"kb_row10_ps2",		/* UNKNOWN           */
+						"kb_row12_ps4";		/* BT_HOST_WAKEUP    */
+				nvidia,function = "kbc";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			kb_row11_ps3 {
+				nvidia,pins =	"kb_row11_ps3";		/* BT_WAKEUP         */
+				nvidia,function = "kbc";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			kb_row14_ps6 {
+				nvidia,pins =	"kb_row14_ps6";		/* suspend_request   */
+				nvidia,function = "kbc";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			kb_row15_ps7 {
+				nvidia,pins =	"kb_row15_ps7";		/* slave-wakeup      */
+				nvidia,function = "kbc";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			/* ULPI ON SPI3 */
+			ulpi_data0_po1 {
+				nvidia,pins =	"ulpi_data0_po1";	/* TOUCH_RESET_N     */
+				nvidia,function = "spi3";
+				nvidia,pull = <2>;
+				nvidia,tristate = <1>;
+			};
+
+			ulpi_data2_po3 {
+				nvidia,pins =	"ulpi_data2_po3";	/* NC                */
+				nvidia,function = "spi3";
+				nvidia,pull = <2>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+			ulpi_data3_po4 {
+				nvidia,pins =	"ulpi_data3_po4";	/* UNKNOWN           */
+				nvidia,function = "spi3";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			ulpi_data4_po5 {
+				nvidia,pins =	"ulpi_data4_po5";	/* UNKNOWN           */
+				nvidia,function = "ulpi";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			ulpi_clk_py0 {
+				nvidia,pins =	"ulpi_clk_py0";		/* LCD_EN            */
+				nvidia,function = "rsvd";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+			};
+
+			ulpi_dir_py1 {
+				nvidia,pins =	"ulpi_dir_py1";		/* UNKNOWN           */
+				nvidia,function = "rsvd";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+			};
+
+			ulpi_stp_py3 {
+				nvidia,pins =	"ulpi_stp_py3";		/* MUIC_INIT         */
+				nvidia,function = "spi1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			ulpi_nxt_py2 {
+				nvidia,pins =	"ulpi_nxt_py2";		/* UNKNOWN           */
+				nvidia,function = "rsvd";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+
+			/* UART-A GPIOs */
+			pu0 {
+				nvidia,pins =	"pu0";
+				nvidia,function = "uarta";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pu1 {
+				nvidia,pins =	"pu1";
+				nvidia,function = "uarta";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			pu2 {
+				nvidia,pins =	"pu2";
+				nvidia,function = "uarta";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			pu3 {
+				nvidia,pins =	"pu3";
+				nvidia,function = "uarta";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+
+			/* PWM GPIOs */
+			pu4 {
+				nvidia,pins =	"pu4";
+				nvidia,function = "pwm1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+
+			pu6 {
+				nvidia,pins =	"pu4";
+				nvidia,function = "pwm3";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* RESERVED GPIOs */
+			pv0 {
+				nvidia,pins =	"pv0";			/* HOST_WAKEUP(MDM)  */
+				nvidia,function = "rsvd";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			pv1 {
+				nvidia,pins =	"pv1";			/* MUIC_INIT         */
+				nvidia,function = "rsvd";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pv3 {
+				nvidia,pins =	"pv3";
+				nvidia,function = "rsvd1";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			pu5 {
+				nvidia,pins =	"pu5";			/* HOST_ACTIVE       */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pcc1 {
+				nvidia,pins =	"pcc1";			/* MUIC_INIT         */
+				nvidia,function = "rsvd2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pcc2 {
+				nvidia,pins =	"pcc2";			/* MUIC_INIT         */
+				nvidia,function = "rsvd2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pv2 {
+				nvidia,pins =	"pv2";
+				nvidia,function = "owr";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pbb0 {
+				nvidia,pins =	"pbb0",
+						"pbb7";
+				nvidia,function = "i2s4";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+
+			pbb3 {
+				nvidia,pins =	"pbb3";
+				nvidia,function = "vgp3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pbb4 {
+				nvidia,pins =	"pbb4";			/* SUB_CAM_RESET_N   */
+				nvidia,function = "vgp4";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pbb5 {
+				nvidia,pins =	"pbb5";			/* SUB_CAM_RESET_N   */
+				nvidia,function = "vgp5";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			pbb6 {
+				nvidia,pins =	"pbb6";
+				nvidia,function = "vgp6";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+
+			/* SPI 1 */
+			spi1_mosi_px4 {
+				nvidia,pins =	"spi1_mosi_px4";	/* TOUCH_LDO_EN2     */
+				nvidia,function = "spi2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			spi1_sck_px5 {
+				nvidia,pins =	"spi1_sck_px5";		/* NFC_VEN           */
+				nvidia,function = "spi2";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			spi1_miso_px7 {
+				nvidia,pins =	"spi1_miso_px7";	/* SENSOR_LDO_EN-MPU+AMI*/
+				nvidia,function = "rsvd3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+
+			/* SPI 2 */
+			spi2_mosi_px0 {
+				nvidia,pins =	"spi2_mosi_px0";
+				nvidia,function = "spi2";
+				nvidia,pull = <1>;
+				nvidia,tristate = <0>;
+			};
+			spi2_miso_px1 {
+				nvidia,pins =	"spi2_miso_px1";	/* PROXI_LDO_EN(APDS)*/
+				nvidia,function = "gmi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+			spi2_cs1_n_pw2 {
+				nvidia,pins =	"spi2_cs1_n_pw2";	/* NFC_IRQ           */
+				nvidia,function = "spi2";
+				nvidia,pull = <0>;			/* NORMAL     *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* VIDEO: HDMI(MHL) and CAMERA */
+			hdmi_int_pn7 {
+				nvidia,pins =	"hdmi_int_pn7";		/* MHL_HPD           */
+				nvidia,function = "rsvd0";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;			/* TRISTATE?? *S*/
+				nvidia,enable-input = <1>;
+			};
+
+			hdmi_cec_pee3 {
+				nvidia,pins =	"hdmi_cec_pee3";	/* NC                */
+				nvidia,function = "cec";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+				nvidia,open-drain = <0>;
+			};
+
+			crt_vsync_pv7 {
+				nvidia,pins =	"crt_vsync_pv7",	/*                   */
+						"crt_hsync_pv6";
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			cam_mclk_pcc0 {
+				nvidia,pins =	"cam_mclk_pcc0";	/* CAM_MCLK          */
+				nvidia,function = "vi_alt2";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+
+			/* SDMMC1 PINS: BCM4330 Firmware */
+			sdmmc1_dat0_py7 {
+				nvidia,pins =	"sdmmc1_dat0_py7",	/* SDMMC1_DAT0       */
+						"sdmmc1_dat1_py6",	/* SDMMC1_DAT1       */
+						"sdmmc1_dat2_py5",	/* SDMMC1_DAT2       */
+						"sdmmc1_dat3_py4",	/* SDMMC1_DAT3       */
+						"sdmmc1_cmd_pz1";	/* SDMMC1_CMD        */
+				nvidia,function = "sdmmc1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			sdmmc1_clk_pz0 {
+				nvidia,pins =	"sdmmc1_clk_pz0";	/* SDMMC1_CLK        */
+				nvidia,function = "sdmmc1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* Power rails GPIO */
+			vi_d6_pl4 {
+				nvidia,pins =	"vi_d6_pl4";		/* UNKNOWN           */
+				nvidia,function = "vi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+				nvidia,lock = <0>;
+				nvidia,io-reset = <0>;
+			};
+			vi_d8_pl6 {
+				nvidia,pins =	"vi_d8_pl6",		/* UNKNOWN           */
+						"vi_d9_pl7";		/* UNKNOWN           */
+				nvidia,function = "sdmmc2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,io-reset = <0>;
+			};
+			vi_pclk_pt0 {
+				nvidia,pins =	"vi_pclk_pt0";		/* UNKNOWN           */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,io-reset = <1>;
+			};
+			vi_hsync_pv6 {
+				nvidia,pins =	"vi_hsync_pv6",		/* UNKNOWN           */
+						"vi_hsync_pv7";		/* UNKNOWN           */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+				nvidia,lock = <0>;
+				nvidia,io-reset = <0>;
+			};
+
+			/* VI PINs */
+			vi_d1_pd5 {
+				nvidia,pins =	"vi_d1_pd5",
+						"vi_d2_pl0",
+						"vi_d3_pl1",
+						"vi_d5_pl3",
+						"vi_d7_pl5";
+				nvidia,function = "sdmmc2";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			vi_d4_pl2 {
+				nvidia,pins =	"vi_d4_pl2";
+				nvidia,function = "vi";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+			vi_mclk_pt1 {
+				nvidia,pins =	"vi_mclk_pt1";
+				nvidia,function = "vi";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			vi_d0_pt4 {
+				nvidia,pins =	"vi_d0_pt4",
+						"vi_d10_pt2";
+				nvidia,function = "rsvd1";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			vi_d11_pt3 {
+				nvidia,pins =	"vi_d11_pt3";
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* PCI-Express PINs */
+			pex_l0_prsnt_n_pdd0 {
+				nvidia,pins =	"pex_l0_prsnt_n_pdd0",
+						"pex_l0_clkreq_n_pdd2",
+						"pex_wake_n_pdd3",
+						"pex_l2_prsnt_n_pdd7",
+						"pex_l2_rst_n_pcc6",
+						"pex_l2_clkreq_n_pcc7";
+				nvidia,function = "pcie";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <1>;
+			};
+			pex_l0_rst_n_pdd1 {
+				nvidia,pins =	"pex_l0_rst_n_pdd1";
+				nvidia,function = "pcie";
+				nvidia,pull = <0>;
+				nvidia,tristate = <1>;
+				nvidia,enable-input = <0>;
+			};
+			pex_l1_prsnt_n_pdd4 {
+				nvidia,pins =	"pex_l1_prsnt_n_pdd4",
+						"pex_l1_clkreq_n_pdd6";
+				nvidia,function = "pcie";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			pex_l1_rst_n_pdd5 {
+				nvidia,pins =	"pex_l1_rst_n_pdd5";
+				nvidia,function = "pcie";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			/* Various pins */
+			jtag_rtck_pu7 {
+				nvidia,pins =	"jtag_rtck_pu7";	/* JTAG              */
+				nvidia,function = "rtck";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <0>;
+			};
+
+			owr {
+				nvidia,pins =	"owr";			/* OWR?!             */
+				nvidia,function = "owr";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+
+			/* Various clocks */
+			clk1_out_pw4 {
+				nvidia,pins =	"clk1_out_pw4";		/* UNKNOWN           */
+				nvidia,function = "extperiph1";
+				nvidia,pull = <1>;			/* PULL_DOWN  *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			clk2_out_pw5 {
+				nvidia,pins =	"clk2_out_pw5";		/* UNKNOWN           */
+				nvidia,function = "rsvd1";
+				nvidia,pull = <2>;			/* PULL_UP    *P*/
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			clk3_out_pee0 {
+				nvidia,pins =	"clk3_out_pee0";	/* MIPI_BRIDGE_CLK   */
+				nvidia,function = "extperiph3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			clk1_req_pee2 {
+				nvidia,pins =	"clk1_req_pee2";	/* UNKNOWN           */
+				nvidia,function = "dap";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+			clk2_req_pcc5 {
+				nvidia,pins =	"clk2_req_pcc5";	/* BT_RESET          */
+				nvidia,function = "dap";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+			};
+			clk3_req_pee1 {
+				nvidia,pins=	"clk3_req_pee1";	/* UNKNOWN           */
+				nvidia,function = "dev3";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;			/* NORMAL     *S*/
+				nvidia,enable-input = <1>;
+			};
+
+			/* SYS clock */
+			sys_clk_req_pz5 {
+				nvidia,pins = "sys_clk_req_pz5";	/* SYS               */
+				nvidia,functions = "sysclk";
+				nvidia,pull = <0>;
+				nvidia,tristate = <0>;
+				nvidia,enable-input = <1>;
+			};
+		};
+	};
+
+	ahub {
+		i2s@70080400 {
+			status = "okay";
+		};
+	};
+
+	pmc {
+		status = "okay";
+		nvidia,invert-interrupt;
+		nvidia,suspend-mode = <0>;
+		nvidia,cpu-pwr-good-time = <600>;
+		nvidia,cpu-pwr-off-time = <200>;
+		nvidia,core-pwr-good-time = <2849 2849>;
+		nvidia,core-pwr-off-time = <0>;
+		nvidia,core-power-req-active-high;
+		nvidia,sys-clock-req-active-high;
+		nvidia,lp0-vec = <0xbc0a8000 0x2000>;
+	};
+
+	/* TI WL1283 SDIO */
+	sdhci@78000400 {
+		status = "okay";
+		bus-width = <4>;
+		broken-cd; /* There is no card detection available; polling must be used??? */
+	};
+
+	/* EMMC */
+	sdhci@78000600 {
+		status = "okay";
+		bus-width = <8>;
+		non-removable; /* as it is an eMMC, obviously */
+	};
+
+	serial@70006000 {
+		status = "okay";
+	};
+
+	serial@70006200 {
+		compatible = "nvidia,tegra30-hsuart";
+		status = "okay";
+	};
+
+	/* i2c1 */
+	i2c@7000c000 {
+		status = "okay";
+		clock-frequency = <384000>;
+
+		/* TI TLV320AIC3008 is on SPI1 */
+	};
+
+	/* i2c2 */
+	i2c@7000c400 {
+		status = "okay";
+		clock-frequency = <384000>;
+	};
+
+	/* i2c3 */
+	i2c@7000c500 {
+		status = "okay";
+		clock-frequency = <384000>;
+	};
+
+	/* i2c4 */
+	i2c@7000c700 {
+		status = "okay";
+		clock-frequency = <10000>;
+	};
+
+	/* i2c5 */
+	i2c@7000d000 {
+		status = "okay";
+		clock-frequency = <100000>;
+	};
+
+	/* SPI1? */
+	spi@7000d600 {
+		status = "okay";
+		spi-max-frequency = <10800000>;
+		/* AIC3008 is on SPI1, bus_num 1 */
+		/* Define AIC3008 parameters here, please. */
+	};
+
+	/* SPI4? */
+	spi@7000dc00 {
+		status = "okay";
+		spi-max-frequency = <25000000>;
+		/* HTC rawchip is on SPI4, bus_num 3 */
+		/* Define RAWCHIP parameters here, please. */
+	};
+
+	clocks {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		clk32k_in: clock {
+			compatible = "fixed-clock";
+			reg=<0>;
+			#clock-cells = <0>;
+			clock-frequency = <32768>;
+		};
+	};
+
+	/* tegra-snd-aic3008 // AIC3008 chip */
+	sound {
+		compatible = "nvidia,eprj-audio-tlv320aic3008-endeavoru",
+			     "nvidia,eprj-audio-tlv320aic3008";
+		nvidia,model = "EternityProject TLV320AIC3008 Audio for ENRU";
+
+/*		nvidia,i2s-controller = <&tegra_i2s1>;*/
+/*		nvidia,audio-codec = <&aic3008>;*/
+	};
+};

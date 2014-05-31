@@ -613,7 +613,9 @@ void tegra_lp0_cpu_mode(bool enter)
 #define PMC_DPD_SAMPLE			0x20
 
 static struct tegra_io_dpd tegra_list_io_dpd[] = {
-#if defined(CONFIG_ARCH_TEGRA_3x_SOC) && defined(CONFIG_TEGRA_IO_DPD)
+/* EternityProject: 23/03/2013:
+ * sdhci-tegra.0 doesn't exist on ENR#U. */
+#if defined(CONFIG_ARCH_TEGRA_3x_SOC) && defined(CONFIG_TEGRA_IO_DPD) && !defined(CONFIG_MACH_ENDAVORU)
 	/* sd dpd bits in dpd2 register */
 	IO_DPD_INFO("sdhci-tegra.0",	1,	1), /* SDMMC1 */
 #endif

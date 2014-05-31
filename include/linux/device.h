@@ -21,6 +21,7 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/mutex.h>
+#include <linux/pinctrl/devinfo.h>
 #include <linux/pm.h>
 #include <linux/atomic.h>
 #include <asm/device.h>
@@ -534,6 +535,10 @@ extern void *__devres_alloc(dr_release_t release, size_t size, gfp_t gfp,
 #else
 extern void *devres_alloc(dr_release_t release, size_t size, gfp_t gfp);
 #endif
+extern void devres_for_each_res(struct device *dev, dr_release_t release,
+				dr_match_t match, void *match_data,
+				void (*fn)(struct device *, void *, void *),
+				void *data);
 extern void devres_free(void *res);
 extern void devres_add(struct device *dev, void *res);
 extern void *devres_find(struct device *dev, dr_release_t release,
@@ -543,6 +548,8 @@ extern void *devres_get(struct device *dev, void *new_res,
 extern void *devres_remove(struct device *dev, dr_release_t release,
 			   dr_match_t match, void *match_data);
 extern int devres_destroy(struct device *dev, dr_release_t release,
+			  dr_match_t match, void *match_data);
+extern int devres_release(struct device *dev, dr_release_t release,
 			  dr_match_t match, void *match_data);
 
 /* devres group */
@@ -558,6 +565,10 @@ extern void devm_kfree(struct device *dev, void *p);
 
 void __iomem *devm_request_and_ioremap(struct device *dev,
 			struct resource *res);
+
+/* allows to add/remove a custom action to devres stack */
+int devm_add_action(struct device *dev, void (*action)(void *), void *data);
+void devm_remove_action(struct device *dev, void (*action)(void *), void *data);
 
 struct device_dma_parameters {
 	/*
@@ -597,6 +608,8 @@ struct device_dma_parameters {
  * @pm_domain:	Provide callbacks that are executed during system suspend,
  * 		hibernation, system resume and during runtime PM transitions
  * 		along with subsystem-level and driver-level callbacks.
+ * @pins:	For device pin management.
+ *		See Documentation/pinctrl.txt for details.
  * @numa_node:	NUMA node this device is close to.
  * @dma_mask:	Dma mask (if dma'ble device).
  * @coherent_dma_mask: Like dma_mask, but for alloc_coherent mapping as not all
@@ -647,6 +660,10 @@ struct device {
 					   core doesn't touch it */
 	struct dev_pm_info	power;
 	struct dev_pm_domain	*pm_domain;
+
+#ifdef CONFIG_PINCTRL
+	struct dev_pin_info	*pins;
+#endif
 
 #ifdef CONFIG_NUMA
 	int		numa_node;	/* NUMA node this device is close to */

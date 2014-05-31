@@ -64,8 +64,6 @@ unsigned long thread_saved_pc(struct task_struct *tsk)
  */
 static void default_idle(void)
 {
-	if (cpu_is_offline(smp_processor_id()))
-		cpu_die();
 	local_irq_disable();
 	if (need_resched()) {
 		local_irq_enable();
@@ -93,6 +91,8 @@ void cpu_idle(void)
 		if (test_thread_flag(TIF_MCCK_PENDING))
 			s390_handle_mcck();
 		schedule_preempt_disabled();
+		if (cpu_is_offline(smp_processor_id()))
+			cpu_die();
 	}
 }
 

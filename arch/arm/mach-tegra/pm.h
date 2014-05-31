@@ -94,6 +94,7 @@ unsigned long tegra_min_residency_crail(void);
 #endif
 void tegra_clear_cpu_in_pd(int cpu);
 bool tegra_set_cpu_in_pd(int cpu);
+bool tegra_is_cpu_in_pd(int cpu);
 
 int tegra_suspend_dram(enum tegra_suspend_mode mode, unsigned int flags);
 
@@ -271,6 +272,8 @@ static inline void tegra_smp_clear_power_mask(void){}
 
 #ifdef CONFIG_TRUSTED_FOUNDATIONS
 void tegra_generic_smc(u32 type, u32 subtype, u32 arg);
+void tegra_generic_smc_local(u32 type, u32 subtype, u32 arg);
+void tegra_generic_smc_uncached(u32 type, u32 subtype, u32 arg);
 #endif
 
 /* The debug channel uart base physical address */

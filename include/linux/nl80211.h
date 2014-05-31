@@ -1,3 +1,7 @@
+#ifdef CONFIG_MACH_ENDEAVORU
+#include <linux/nl80211_enru.h>
+#else
+
 #ifndef __LINUX_NL80211_H
 #define __LINUX_NL80211_H
 /*
@@ -168,8 +172,8 @@
  *	%NL80211_ATTR_DTIM_PERIOD, %NL80211_ATTR_SSID,
  *	%NL80211_ATTR_HIDDEN_SSID, %NL80211_ATTR_CIPHERS_PAIRWISE,
  *	%NL80211_ATTR_CIPHER_GROUP, %NL80211_ATTR_WPA_VERSIONS,
- *	%NL80211_ATTR_AKM_SUITES, %NL80211_ATTR_PRIVACY and
- *	%NL80211_ATTR_AUTH_TYPE.
+ *	%NL80211_ATTR_AKM_SUITES, %NL80211_ATTR_PRIVACY,
+ *	%NL80211_ATTR_AUTH_TYPE and %NL80211_ATTR_INACTIVITY_TIMEOUT.
  * @NL80211_CMD_NEW_BEACON: old alias for %NL80211_CMD_START_AP
  * @NL80211_CMD_STOP_AP: Stop AP operation on the given interface
  * @NL80211_CMD_DEL_BEACON: old alias for %NL80211_CMD_STOP_AP
@@ -1046,8 +1050,6 @@ enum nl80211_commands {
  * @NL80211_ATTR_WIPHY_ANTENNA_AVAIL_RX: Bitmap of antennas which are available
  *	for configuration as RX antennas via the above parameters.
  *
- * @NL80211_ATTR_SCAN_FLAGS: scan request control flags (u32).
- *
  * @NL80211_ATTR_MCAST_RATE: Multicast tx rate (in 100 kbps) for IBSS
  *
  * @NL80211_ATTR_OFFCHANNEL_TX_OK: For management frame TX, the frame may be
@@ -1403,10 +1405,6 @@ enum nl80211_attrs {
 
 	NL80211_ATTR_WIPHY_ANTENNA_AVAIL_TX,
 	NL80211_ATTR_WIPHY_ANTENNA_AVAIL_RX,
-
-#ifdef CONFIG_MAC80211_SCAN_ABORT
-	NL80211_ATTR_SCAN_FLAGS,
-#endif
 
 	NL80211_ATTR_SUPPORT_MESH_AUTH,
 	NL80211_ATTR_STA_PLINK_STATE,
@@ -2528,18 +2526,6 @@ enum nl80211_tx_power_setting {
 };
 
 /**
- * enum nl80211_scan_flags -  scan request control flags
- *
- * Scan request control flags are used to control the handling
- * of NL80211_CMD_TRIGGER_SCAN, requests.
- *
- * @NL80211_SCAN_FLAG_TX_ABORT: abort scan if tx collides
- */
-enum nl80211_scan_flags {
-	NL80211_SCAN_FLAG_TX_ABORT	= 1<<0,
-};
-
-/**
  * enum nl80211_wowlan_packet_pattern_attr - WoWLAN packet pattern attribute
  * @__NL80211_WOWLAN_PKTPAT_INVALID: invalid number for nested attribute
  * @NL80211_WOWLAN_PKTPAT_PATTERN: the pattern, values where the mask has
@@ -2882,3 +2868,5 @@ enum nl80211_probe_resp_offload_support_attr {
 };
 
 #endif /* __LINUX_NL80211_H */
+
+#endif /* !CONFIG_MACH_ENDEAVORU */

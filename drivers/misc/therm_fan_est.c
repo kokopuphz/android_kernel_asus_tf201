@@ -1,7 +1,7 @@
 /*
  * drivers/misc/therm_fan_est.c
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2010-2012 NVIDIA Corporation.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -31,8 +31,6 @@
 #include <linux/thermal.h>
 #include <linux/module.h>
 #include <linux/hwmon-sysfs.h>
-
-#define DEFERRED_RESUME_TIME 3000
 
 struct therm_fan_estimator {
 	long cur_temp;
@@ -66,7 +64,7 @@ static void fan_set_trip_temp_hyst(struct therm_fan_estimator *est, int trip,
 static void therm_fan_est_work_func(struct work_struct *work)
 {
 	int i, j, index, trip_index, sum = 0;
-	long temp = 0;
+	long temp;
 	struct delayed_work *dwork = container_of(work,
 					struct delayed_work, work);
 	struct therm_fan_estimator *est = container_of(
@@ -97,15 +95,13 @@ static void therm_fan_est_work_func(struct work_struct *work)
 	}
 
 	if (est->current_trip_index != (trip_index - 1)) {
-		if (!((trip_index - 1) % 2) || (!est->current_trip_index)) {
-			pr_info("%s, cur_temp:%ld, cur_trip_index:%d",
-			__func__, est->cur_temp, est->current_trip_index);
-			thermal_zone_device_update(est->thz);
-		}
 		est->current_trip_index = trip_index - 1;
+		if (!((trip_index - 1) % 2))
+			thermal_zone_device_update(est->thz);
 	}
 
 	est->ntemp++;
+
 	queue_delayed_work(est->workqueue, &est->therm_fan_est_work,
 				msecs_to_jiffies(est->polling_period));
 }
@@ -410,9 +406,7 @@ static int therm_fan_est_suspend(struct platform_device *pdev,
 	if (!est)
 		return -EINVAL;
 
-	pr_info("therm-fan-est: %s, cur_temp:%ld", __func__, est->cur_temp);
 	cancel_delayed_work(&est->therm_fan_est_work);
-	est->current_trip_index = 0;
 
 	return 0;
 }
@@ -423,11 +417,10 @@ static int therm_fan_est_resume(struct platform_device *pdev)
 
 	if (!est)
 		return -EINVAL;
-	pr_info("therm-fan-est: %s, cur_temp:%ld", __func__, est->cur_temp);
 
 	queue_delayed_work(est->workqueue,
 				&est->therm_fan_est_work,
-				msecs_to_jiffies(DEFERRED_RESUME_TIME));
+				msecs_to_jiffies(est->polling_period));
 	return 0;
 }
 #endif

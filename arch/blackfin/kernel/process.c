@@ -83,10 +83,6 @@ void cpu_idle(void)
 	while (1) {
 		void (*idle)(void) = pm_idle;
 
-#ifdef CONFIG_HOTPLUG_CPU
-		if (cpu_is_offline(smp_processor_id()))
-			cpu_die();
-#endif
 		if (!idle)
 			idle = default_idle;
 		tick_nohz_idle_enter();
@@ -96,6 +92,10 @@ void cpu_idle(void)
 		rcu_idle_exit();
 		tick_nohz_idle_exit();
 		schedule_preempt_disabled();
+#ifdef CONFIG_HOTPLUG_CPU
+		if (cpu_is_offline(smp_processor_id()))
+			cpu_die();
+#endif
 	}
 }
 

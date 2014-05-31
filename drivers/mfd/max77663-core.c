@@ -123,6 +123,13 @@
 
 #define ONOFF_IRQ_EN0_RISING		(1 << 3)
 
+#ifdef CONFIG_MACH_X3
+#define ONOFF_MRT_MASK_10S		(0b110 << 3)
+#define ONOFF_MRT_MASK			(1 << 5 | 1 << 4 | 1 << 3)
+#define ONOFF_SFT_PWR_OFF_MASK		(1 << 1)
+#define ONOFF_SFT_RST_WK_MASK		(1 << 7)
+#endif
+
 enum {
 	CACHE_IRQ_LBT,
 	CACHE_IRQ_SD,
@@ -368,6 +375,28 @@ int max77663_set_bits(struct device *dev, u8 addr, u8 mask, u8 value,
 }
 EXPORT_SYMBOL(max77663_set_bits);
 
+#ifdef CONFIG_MACH_X3
+/* EternityProject: Write a read function for X3 */
+int max77663_get_bits(struct device *dev, u8 addr, u8 value, bool is_rtc)
+{
+	struct max77663_chip *chip = dev_get_drvdata(dev);
+	int ret, regval;
+	struct regmap *regmap = chip->regmap_power;
+
+	if (is_rtc)
+		regmap = chip->regmap_rtc;
+
+	mutex_lock(&chip->io_lock);
+	ret = regmap_read(regmap, addr, &regval);
+	mutex_unlock(&chip->io_lock);
+
+	if (ret != 0)
+		return ret;
+
+	return regval;
+}
+#endif
+
 static void max77663_power_off(void)
 {
 	struct max77663_chip *chip = max77663_chip;
@@ -375,15 +404,76 @@ static void max77663_power_off(void)
 	if (!chip)
 		return;
 
-	dev_info(chip->dev, "%s: Global shutdown\n", __func__);
-	max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG1,
-			  ONOFF_SFT_RST_MASK, ONOFF_SFT_RST_MASK, 0);
+#ifdef CONFIG_MACH_X3
+#define MAX77663_REG_ONOFF_STAT	0x15
+#define ONOFF_STAT_ACOK_MASK	(1 << 1)
+	if (max77663_get_bits(chip->dev, MAX77663_REG_ONOFF_STAT, ONOFF_STAT_ACOK_MASK, 0))
+		max77663_power_rst_wkup(1);
+	else
+#endif
+	{
+		dev_info(chip->dev, "%s: Global shutdown\n", __func__);
+		max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG1,
+#ifdef CONFIG_MACH_X3
+				  ONOFF_SFT_PWR_OFF_MASK, ONOFF_SFT_PWR_OFF_MASK, 0);
+#else
+				  ONOFF_SFT_RST_MASK, ONOFF_SFT_RST_MASK, 0);
+#endif
+	}
 }
+
+#ifdef CONFIG_MACH_X3
+#define MAX77663_RTC_UPDATE0		0x04
+#define MAX77663_RTC_ALARM_SEC2		0x15
+int max77663_set_ScratchRegister(u8 bit)
+{
+	struct max77663_chip *chip = max77663_chip;
+	u8 val = 0x0b; //write
+
+	if (!chip)
+		return -EINVAL;
+
+	max77663_set_bits(chip->dev, MAX77663_RTC_ALARM_SEC2, bit, bit, 1);
+
+	max77663_write(chip->dev, MAX77663_RTC_UPDATE0, &val, 1, 1);
+	mdelay(15);
+}
+EXPORT_SYMBOL(max77663_set_ScratchRegister);
+
+int max77663_power_rst_wkup(int on)
+{
+	struct max77663_chip *chip = max77663_chip;
+	int ret = 0;
+
+	if (!chip)
+		return -EINVAL;
+
+	/*
+	 * EternityProject Note, 12/05/2013:
+	 * ONOFF_SFT_RST_MASK on the ONOFF_CFG2 register is
+	 * a wakeup bit.
+	 */
+	ret = max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG2,
+				 ONOFF_SFT_RST_WK_MASK, on ?ONOFF_SFT_RST_WK_MASK:0, 0);
+
+	dev_info(chip->dev, "%s: restart 1\n", __func__);
+	if(ret < 0)
+		return ret;
+
+	udelay(100);
+	dev_info(chip->dev, "%s: restart 2\n", __func__);
+
+	return max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG1,
+				 ONOFF_SFT_RST_MASK, ONOFF_SFT_RST_MASK, 0);
+}
+EXPORT_SYMBOL(max77663_power_rst_wkup);
+#endif
 
 static int max77663_sleep(struct max77663_chip *chip, bool on)
 {
 	int ret = 0;
 
+#ifndef CONFIG_MACH_X3
 	if (chip->pdata->flags & SLP_LPM_ENABLE) {
 		/* Put the power rails into Low-Power mode during sleep mode,
 		 * if the power rail's power mode is GLPM. */
@@ -393,7 +483,7 @@ static int max77663_sleep(struct max77663_chip *chip, bool on)
 		if (ret < 0)
 			return ret;
 	}
-
+#endif
 	/* Enable sleep that AP can be placed into sleep mode
 	 * by pulling EN1 low */
 	return max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG1,
@@ -943,6 +1033,11 @@ static int max77663_probe(struct i2c_client *client,
 
 	if (pdata->use_power_off && !pm_power_off)
 		pm_power_off = max77663_power_off;
+
+#ifdef CONFIG_MACH_X3
+	max77663_set_bits(chip->dev, MAX77663_REG_ONOFF_CFG1,
+				ONOFF_MRT_MASK, ONOFF_MRT_MASK_10S, 0);
+#endif
 
 	ret =  mfd_add_devices(&client->dev, -1, max77663_cells,
 			ARRAY_SIZE(max77663_cells), NULL, chip->irq_base);

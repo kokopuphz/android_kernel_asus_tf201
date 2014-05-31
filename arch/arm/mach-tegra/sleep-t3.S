@@ -165,7 +165,7 @@ ENDPROC(tegra3_hotplug_shutdown)
  * and powergates it -- flags (in R0) indicate the request type.
  * Must never be called for CPU 0.
  *
- * corrupts r0-r4, r12
+ * EternityProject: Corrupts r0-r5, r12
  */
 ENTRY(tegra3_cpu_reset)
 	cpu_id	r3
@@ -188,7 +188,10 @@ ENTRY(tegra3_cpu_reset)
 #else
 	mov	r4, #(1 << 4)			@ wfe bitmap
 #endif
-	orr	r12, r12, r4, lsl r3
+	/* EternityProject: Use legal Thumb-2 code */
+	lsl	r5, r4, r3
+	orr	r12, r12, r5
+	/* EternityProject: END */
 	str	r12, [r1]
 
 	/* Halt this CPU. */
@@ -804,10 +807,10 @@ powerdown_pll_cx:
 	str	r0, [r5, #CLK_RESET_PLLX_BASE]
 #if !defined(CONFIG_ARCH_TEGRA_3x_SOC)
 	/*
-	 * FIXME: put PLLM/C into IDDQ (need additional testing)
+	 * FIXME: put PLLM into IDDQ (need additional testing)
 	 * pll_iddq_entry r1, r5, CLK_RESET_PLLM_MISC, CLK_RESET_PLLM_MISC_IDDQ
-	 * pll_iddq_entry r1, r5, CLK_RESET_PLLC_MISC, CLK_RESET_PLLC_MISC_IDDQ
 	 */
+	pll_iddq_entry r1, r5, CLK_RESET_PLLC_MISC, CLK_RESET_PLLC_MISC_IDDQ
 	pll_iddq_entry r1, r5, CLK_RESET_PLLX_MISC3, CLK_RESET_PLLX_MISC3_IDDQ
 #endif
 

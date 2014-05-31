@@ -129,13 +129,23 @@ static   bool is_tegra_debug_uart_hsport;
 static struct board_info pmu_board_info;
 static struct board_info display_board_info;
 static int panel_id;
-static int touch_panel_id;
 static struct board_info camera_board_info;
 static struct board_info io_board_info;
 static struct board_info button_board_info;
 static struct board_info joystick_board_info;
 static struct board_info rightspeaker_board_info;
 static struct board_info leftspeaker_board_info;
+
+/* +++ EternityProject: Board-specific OEM hacks */
+#ifdef CONFIG_MACH_ENDEAVORU
+unsigned long g_panel_id;
+#endif
+#ifdef CONFIG_MACH_LGE
+static int bootmode = 1;
+static int bootbatteryexist = 1;
+static int bootbatteryVerified = 1;
+#endif
+/* --- EternityProject: END */
 
 static int pmu_core_edp;
 static int board_panel_type;
@@ -284,10 +294,17 @@ static __initdata struct tegra_clk_init_table tegra30_clk_init_table[] = {
 	{ "kfuse",	NULL,		0,		true },
 	{ "fuse",	NULL,		0,		true },
 #ifdef CONFIG_TEGRA_SILICON_PLATFORM
+#ifdef CONFIG_MACH_X3
+	{ "pll_p",	NULL,		408000000,	true },
+	{ "pll_p_out1",	"pll_p",	9600000,	true },
+	{ "pll_p_out2",	"pll_p",	48000000,	true },
+	{ "pll_p_out3",	"pll_p",	102000000,	true },
+#else
 	{ "pll_p",	NULL,		0,		true },
 	{ "pll_p_out1",	"pll_p",	0,		false },
 	{ "pll_p_out2",	"pll_p",	48000000,	false },
 	{ "pll_p_out3",	"pll_p",	0,		true },
+#endif
 	{ "pll_m_out1",	"pll_m",	275000000,	false },
 	{ "pll_p_out4",	"pll_p",	102000000,	true },
 	{ "sclk",	"pll_p_out4",	102000000,	true },
@@ -307,12 +324,19 @@ static __initdata struct tegra_clk_init_table tegra30_clk_init_table[] = {
 #ifdef CONFIG_TEGRA_SLOW_CSITE
 	{ "csite",	"clk_m",	1000000,	true },
 #else
+#ifdef CONFIG_MACH_X3
+	{ "csite",	NULL,		4250000,	true },
+#else
 	{ "csite",      NULL,           0,              true },
+#endif
 #endif
 	{ "pll_u",	NULL,		480000000,	false },
 	{ "sdmmc1",	"pll_p",	48000000,	false},
 	{ "sdmmc3",	"pll_p",	48000000,	false},
 	{ "sdmmc4",	"pll_p",	48000000,	false},
+#ifdef CONFIG_MACH_X3
+	{ "vi_sensor",	"pll_p",	0,		false },
+#endif
 	{ "sbc1.sclk",	NULL,		40000000,	false},
 	{ "sbc2.sclk",	NULL,		40000000,	false},
 	{ "sbc3.sclk",	NULL,		40000000,	false},
@@ -443,7 +467,18 @@ static void tegra_cache_smc(bool enable, u32 arg)
 	if (enable && !l2x0_enabled)
 		tegra_generic_smc(0xFFFFF100, 0x00000001, arg);
 	else if (!enable && l2x0_enabled)
-		tegra_generic_smc(0xFFFFF100, 0x00000002, arg);
+//		if (tegra_is_cpu_in_pd(0) == false) {
+			/*
+			 * EternityProject, 14/05/2013:
+			 * If we are entering LP0 or LP1, ask SecureOS to flush
+			 * and disable the L2 cache.
+			 * If we are entering LP2, the L2 disable is being handled
+			 * by tegra_sleep_cpu() (see pm.c). That means no more
+			 * SecureOS tasks will be scheduler, allowing it to
+			 * manage and optimize L2 flushes directly on its side.
+			 */
+			tegra_generic_smc_uncached(0xFFFFF100, 0x00000002, arg);
+//		}
 	local_irq_restore(flags);
 
 	if (need_affinity_switch && can_switch_affinity) {
@@ -483,18 +518,24 @@ void tegra_init_cache(bool init)
 #endif
 
 #ifdef CONFIG_TRUSTED_FOUNDATIONS
-	/* issue the SMC to enable the L2 */
-	aux_ctrl = readl_relaxed(p + L2X0_AUX_CTRL);
-	trace_smc_init_cache(NVSEC_SMC_START);
-	tegra_cache_smc(true, aux_ctrl);
-	trace_smc_init_cache(NVSEC_SMC_DONE);
+	if (init) {
+		/* issue the SMC to enable the L2 */
+		aux_ctrl = readl_relaxed(p + L2X0_AUX_CTRL);
+		trace_smc_init_cache(NVSEC_SMC_START);
+		tegra_cache_smc(true, aux_ctrl);
+		trace_smc_init_cache(NVSEC_SMC_DONE);
 
-	/* after init, reread aux_ctrl and register handlers */
-	aux_ctrl = readl_relaxed(p + L2X0_AUX_CTRL);
-	l2x0_init(p, aux_ctrl, 0xFFFFFFFF);
+		/* after init, reread aux_ctrl and register handlers */
+		aux_ctrl = readl_relaxed(p + L2X0_AUX_CTRL);
+		l2x0_init(p, aux_ctrl, 0xFFFFFFFF);
 
-	/* override outer_disable() with our disable */
-	outer_cache.disable = tegra_l2x0_disable;
+		/* override outer_disable() with our disable */
+		outer_cache.disable = tegra_l2x0_disable;
+	} else {
+		/* reenable L2 in secureos */
+		aux_ctrl = readl_relaxed(p + L2X0_AUX_CTRL);
+		tegra_generic_smc_uncached(0xFFFFF100, 0x00000004, aux_ctrl);
+	}
 #else
 #if defined(CONFIG_ARCH_TEGRA_2x_SOC)
 	tag_latency = 0x331;
@@ -732,7 +773,6 @@ void __init tegra30_init_early(void)
 	tegra_init_power();
 	tegra_init_ahb_gizmo_settings();
 	tegra_init_debug_uart_rate();
-	tegra_gpio_resume_init();
 	tegra_ram_console_debug_reserve(SZ_1M);
 
 	init_dma_coherent_pool_size(SZ_1M);
@@ -891,22 +931,79 @@ static int __init tegra_board_panel_id(char *options)
 }
 __setup("display_panel=", tegra_board_panel_id);
 
-int tegra_get_touch_panel_id(void)
-{
-	return touch_panel_id;
-}
-static int __init tegra_touch_panel_id(char *options)
-{
-	char *p = options;
-	touch_panel_id = memparse(p, &p);
-	return touch_panel_id;
-}
-__setup("tp_id=", tegra_touch_panel_id);
-
 enum power_supply_type get_power_supply_type(void)
 {
 	return pow_supply_type;
 }
+
+
+/* +++ EternityProject: Board-specific OEM hacks */
+#ifdef CONFIG_MACH_ENDEAVORU
+static int __init tegra_bootloader_panel_arg(char *options)
+{
+	char *p = options;
+	g_panel_id = memparse(p, &p);
+
+	pr_info("Found panel_vendor: %0lx\n", g_panel_id);
+	return 1;
+}
+__setup("panel_id=", tegra_bootloader_panel_arg);
+#endif
+
+#ifdef CONFIG_MACH_LGE
+static int __init tegra_bootmode(char *info)
+{
+	char *p = info;
+
+	if (!strncmp(p, "normal", 6))
+		bootmode = 1;
+	else if (!strncmp(p, "charger", 7))
+		bootmode = 0;
+
+	return 1;
+}
+
+int is_tegra_bootmode(void)
+{
+	return bootmode;
+}
+__setup("androidboot.mode=", tegra_bootmode);
+
+
+static int __init tegra_batteryexist(char *options)
+{
+	char *p = options;
+	bootbatteryexist = memparse(p, &p);
+
+	return 1;
+}
+
+int is_tegra_batteryexistWhenBoot(void)
+{
+	return bootbatteryexist;
+}
+__setup("batteryexist=", tegra_batteryexist);
+
+
+static int __init tegra_batteryVerified(char *options)
+{
+	char *p = options;
+	bootbatteryVerified = memparse(p, &p);
+
+	return 1;
+}
+
+int is_tegra_batteryVerified(void)
+{
+	return bootbatteryVerified;
+}
+__setup("batteryVerified=", tegra_batteryVerified);
+
+#endif /* CONFIG_MACH_LGE */
+
+/* --- EternityProject: END */
+
+
 static int __init tegra_board_power_supply_type(char *options)
 {
 	if (!strcmp(options, "Adapter"))
@@ -1571,8 +1668,12 @@ void __init tegra_reserve(unsigned long carveout_size, unsigned long fb_size,
 			nvdumper_reserved + NVDUMPER_RESERVED_SIZE - 1);
 	}
 #endif
+#ifdef CONFIG_MACH_ENDEAVORU
+nvdumper_reserve_init();
+#endif
 }
 
+#ifndef CONFIG_MACH_LGE
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
 static struct persistent_ram_descriptor desc = {
 	.name = "ram_console",
@@ -1626,6 +1727,54 @@ void __init tegra_ram_console_debug_init(void)
 			__func__, err);
 }
 #endif
+#else /* CONFIG_MACH_LGE */
+
+static struct resource ram_console_resources[] = {
+	{
+		.flags = IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device ram_console_device = {
+	.name 		= "ram_console",
+	.id 		= -1,
+	.num_resources	= ARRAY_SIZE(ram_console_resources),
+	.resource	= ram_console_resources,
+};
+
+void __init tegra_ram_console_debug_reserve(unsigned long ram_console_size)
+{
+	struct resource *res;
+	long ret;
+
+	res = platform_get_resource(&ram_console_device, IORESOURCE_MEM, 0);
+	if (!res)
+		goto fail;
+	res->start = memblock_end_of_DRAM() - ram_console_size;
+	res->end = res->start + ram_console_size - 1;
+	ret = memblock_remove(res->start, ram_console_size);
+	if (ret)
+		goto fail;
+
+	return;
+
+fail:
+	ram_console_device.resource = NULL;
+	ram_console_device.num_resources = 0;
+	pr_err("Failed to reserve memory block for ram console\n");
+}
+
+void __init tegra_ram_console_debug_init(void)
+{
+	int err;
+
+	err = platform_device_register(&ram_console_device);
+	if (err) {
+		pr_err("%s: ram console registration failed (%d)!\n", __func__, err);
+	}
+}
+
+#endif /* CONFIG_MACH_LGE */
 
 void __init tegra_release_bootloader_fb(void)
 {
@@ -1640,6 +1789,7 @@ void __init tegra_release_bootloader_fb(void)
 			pr_err("Failed to free bootloader fb2.\n");
 }
 
+#if 0
 static struct platform_device *pinmux_devices[] = {
 	&tegra_gpio_device,
 	&tegra_pinmux_device,
@@ -1649,6 +1799,7 @@ void tegra_enable_pinmux(void)
 {
 	platform_add_devices(pinmux_devices, ARRAY_SIZE(pinmux_devices));
 }
+#endif
 
 static const char *tegra_revision_name[TEGRA_REVISION_MAX] = {
 	[TEGRA_REVISION_UNKNOWN] = "unknown",

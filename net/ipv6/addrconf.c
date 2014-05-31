@@ -89,6 +89,10 @@
 #include <linux/seq_file.h>
 #include <linux/export.h>
 
+#ifdef CONFIG_MACH_ENDEAVORU
+#include <linux/moduleparam.h>
+#endif
+
 /* Set to 3 to get tracing... */
 #define ACONF_DEBUG 2
 
@@ -238,6 +242,10 @@ const struct in6_addr in6addr_any = IN6ADDR_ANY_INIT;
 const struct in6_addr in6addr_loopback = IN6ADDR_LOOPBACK_INIT;
 const struct in6_addr in6addr_linklocal_allnodes = IN6ADDR_LINKLOCAL_ALLNODES_INIT;
 const struct in6_addr in6addr_linklocal_allrouters = IN6ADDR_LINKLOCAL_ALLROUTERS_INIT;
+
+#ifdef CONFIG_MACH_ENDEAVORU
+static unsigned int temp_eui[4] = {0};
+#endif
 
 /* Check if a valid qdisc is available */
 static inline bool addrconf_qdisc_ok(const struct net_device *dev)
@@ -493,8 +501,7 @@ static void addrconf_forward_change(struct net *net, __s32 newf)
 	struct net_device *dev;
 	struct inet6_dev *idev;
 
-	rcu_read_lock();
-	for_each_netdev_rcu(net, dev) {
+	for_each_netdev(net, dev) {
 		idev = __in6_dev_get(dev);
 		if (idev) {
 			int changed = (!idev->cnf.forwarding) ^ (!newf);
@@ -503,7 +510,6 @@ static void addrconf_forward_change(struct net *net, __s32 newf)
 				dev_forward_change(idev);
 		}
 	}
-	rcu_read_unlock();
 }
 
 static int addrconf_fixup_forwarding(struct ctl_table *table, int *p, int newf)
@@ -795,10 +801,16 @@ static void ipv6_del_addr(struct inet6_ifaddr *ifp)
 		struct in6_addr prefix;
 		struct rt6_info *rt;
 		struct net *net = dev_net(ifp->idev->dev);
-		ipv6_addr_prefix(&prefix, &ifp->addr, ifp->prefix_len);
-		rt = rt6_lookup(net, &prefix, NULL, ifp->idev->dev->ifindex, 1);
+		struct flowi6 fl6 = {};
 
-		if (rt && addrconf_is_prefix_route(rt)) {
+		ipv6_addr_prefix(&prefix, &ifp->addr, ifp->prefix_len);
+		fl6.flowi6_oif = ifp->idev->dev->ifindex;
+		fl6.daddr = prefix;
+		rt = (struct rt6_info *)ip6_route_lookup(net, &fl6,
+							 RT6_LOOKUP_F_IFACE);
+
+		if (rt != net->ipv6.ip6_null_entry &&
+		    addrconf_is_prefix_route(rt)) {
 			if (onlink == 0) {
 				ip6_del_rt(rt);
 				rt = NULL;
@@ -1566,8 +1578,21 @@ static int addrconf_ifid_gre(u8 *eui, struct net_device *dev)
 
 static int ipv6_generate_eui64(u8 *eui, struct net_device *dev)
 {
+#ifdef CONFIG_MACH_ENDEAVORU
+	int i = 0;
+#endif
+
 	switch (dev->type) {
 	case ARPHRD_ETHER:
+#ifdef CONFIG_MACH_ENDEAVORU
+	{
+		for (i = 0; i < 4; i++) {
+			eui[i*2] = (temp_eui[i] & 0xFF00) >> 8;
+			eui[i*2+1] = temp_eui[i] & 0xFF;
+		}
+		return 0;
+	}
+#endif
 	case ARPHRD_FDDI:
 	case ARPHRD_IEEE802_TR:
 		return addrconf_ifid_eui48(eui, dev);
@@ -1732,7 +1757,7 @@ static struct rt6_info *addrconf_get_prefix_route(const struct in6_addr *pfx,
 			continue;
 		if ((rt->rt6i_flags & flags) != flags)
 			continue;
-		if ((noflags != 0) && ((rt->rt6i_flags & flags) != 0))
+		if ((rt->rt6i_flags & noflags) != 0)
 			continue;
 		dst_hold(&rt->dst);
 		break;
@@ -3091,14 +3116,15 @@ static struct inet6_ifaddr *if6_get_first(struct seq_file *seq, loff_t pos)
 		struct hlist_node *n;
 		hlist_for_each_entry_rcu_bh(ifa, n, &inet6_addr_lst[state->bucket],
 					 addr_lst) {
+			if (!net_eq(dev_net(ifa->idev->dev), net))
+				continue;
 			/* sync with offset */
 			if (p < state->offset) {
 				p++;
 				continue;
 			}
 			state->offset++;
-			if (net_eq(dev_net(ifa->idev->dev), net))
-				return ifa;
+			return ifa;
 		}
 
 		/* prepare for next bucket */
@@ -3116,18 +3142,20 @@ static struct inet6_ifaddr *if6_get_next(struct seq_file *seq,
 	struct hlist_node *n = &ifa->addr_lst;
 
 	hlist_for_each_entry_continue_rcu_bh(ifa, n, addr_lst) {
+		if (!net_eq(dev_net(ifa->idev->dev), net))
+			continue;
 		state->offset++;
-		if (net_eq(dev_net(ifa->idev->dev), net))
-			return ifa;
+		return ifa;
 	}
 
 	while (++state->bucket < IN6_ADDR_HSIZE) {
 		state->offset = 0;
 		hlist_for_each_entry_rcu_bh(ifa, n,
 				     &inet6_addr_lst[state->bucket], addr_lst) {
+			if (!net_eq(dev_net(ifa->idev->dev), net))
+				continue;
 			state->offset++;
-			if (net_eq(dev_net(ifa->idev->dev), net))
-				return ifa;
+			return ifa;
 		}
 	}
 
@@ -4253,6 +4281,17 @@ static void ipv6_ifa_notify(int event, struct inet6_ifaddr *ifp)
 		__ipv6_ifa_notify(event, ifp);
 	rcu_read_unlock_bh();
 }
+
+#ifdef CONFIG_MACH_ENDEAVORU
+static struct kernel_param_ops temp_eui_ops = {
+	.set = param_set_uint,
+	.get = param_get_uint,
+};
+module_param_cb(temp_eui0, &temp_eui_ops, &(temp_eui[0]), 0644);
+module_param_cb(temp_eui1, &temp_eui_ops, &(temp_eui[1]), 0644);
+module_param_cb(temp_eui2, &temp_eui_ops, &(temp_eui[2]), 0644);
+module_param_cb(temp_eui3, &temp_eui_ops, &(temp_eui[3]), 0644);
+#endif
 
 #ifdef CONFIG_SYSCTL
 

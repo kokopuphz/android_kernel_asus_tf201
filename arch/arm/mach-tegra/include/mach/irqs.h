@@ -580,6 +580,12 @@
 
 #define NR_BOARD_IRQS			64
 
-#define NR_IRQS				(INT_BOARD_BASE + NR_BOARD_IRQS)
+#ifdef CONFIG_MACH_ENDEAVORU
+#define NR_MICROP_IRQS			16
+#else
+#define NR_MICROP_IRQS			0
+#endif
+
+#define NR_IRQS				(INT_BOARD_BASE + NR_BOARD_IRQS + NR_MICROP_IRQS)
 
 #endif

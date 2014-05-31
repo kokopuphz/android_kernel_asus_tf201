@@ -23,7 +23,6 @@
 #include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/miscdevice.h>
-#include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/nvhost.h>
 #include <linux/platform_device.h>
@@ -42,7 +41,6 @@
 #include <mach/iomap.h>
 #include <mach/legacy_irq.h>
 #include <linux/nvmap.h>
-#include <mach/powergate.h>
 
 #if defined(CONFIG_TEGRA_AVP_KERNEL_ON_MMU)
 #include "../avp/headavp.h"
@@ -69,7 +67,6 @@
 
 /* AVP behavior params */
 #define NVAVP_OS_IDLE_TIMEOUT		100 /* milli-seconds */
-#define NVAVP_OUTBOX_WRITE_TIMEOUT	1000 /* milli-seconds */
 
 #if defined(CONFIG_TEGRA_NVAVP_AUDIO)
 /* Two control channels: Audio and Video channels */
@@ -88,9 +85,6 @@
 
 #define IS_VIDEO_CHANNEL_ID(channel_id)	(channel_id == NVAVP_VIDEO_CHANNEL ? 1: 0)
 
-#define SCLK_BOOST_RATE		40000000
-
-static bool boost_sclk;
 
 struct nvavp_channel {
 	struct mutex			pushbuffer_lock;
@@ -139,16 +133,17 @@ struct nvavp_info {
 	struct nvmap_client		*nvmap;
 
 	struct nvavp_channel		channel_info[NVAVP_NUM_CHANNELS];
-	bool				pending;
 
 	u32				syncpt_id;
 	u32				syncpt_value;
 
-	struct platform_device		*nvhost_dev;
+	struct nvhost_device		*nvhost_dev;
 	struct miscdevice		video_misc_dev;
 #if defined(CONFIG_TEGRA_NVAVP_AUDIO)
 	struct miscdevice		audio_misc_dev;
 #endif
+
+	bool                            pending;
 };
 
 struct nvavp_clientctx {
@@ -158,8 +153,8 @@ struct nvavp_clientctx {
 	struct nvmap_handle_ref *gather_mem;
 	int num_relocs;
 	struct nvavp_info *nvavp;
-	int channel_id;
 	u32 clk_reqs;
+	int channel_id;
 };
 
 #if defined(CONFIG_TEGRA_NVAVP_AUDIO)
@@ -187,21 +182,6 @@ static int nvavp_get_video_init_status(struct nvavp_info *nvavp)
 static struct nvavp_channel *nvavp_get_channel_info(struct nvavp_info *nvavp, int channel_id)
 {
 	return &nvavp->channel_info[channel_id];
-}
-
-static int nvavp_outbox_write(unsigned int val)
-{
-	unsigned int wait_ms = 0;
-
-	while (readl(NVAVP_OS_OUTBOX)) {
-		usleep_range(1000, 2000);
-		if (++wait_ms > NVAVP_OUTBOX_WRITE_TIMEOUT) {
-			pr_err("No update from AVP in %d ms\n", wait_ms);
-			return -ETIMEDOUT;
-		}
-	}
-	writel(val, NVAVP_OS_OUTBOX);
-	return 0;
 }
 
 static void nvavp_set_channel_control_area(struct nvavp_info *nvavp, int channel_id)
@@ -260,45 +240,12 @@ static struct clk *nvavp_clk_get(struct nvavp_info *nvavp, int id)
 	return NULL;
 }
 
-static int nvavp_powergate_vde(struct nvavp_info *nvavp)
-{
-	int ret = 0;
-
-	dev_dbg(&nvavp->nvhost_dev->dev, "%s++\n", __func__);
-
-	/* Powergate VDE */
-	ret = tegra_powergate_partition(TEGRA_POWERGATE_VDEC);
-	if (ret)
-		dev_err(&nvavp->nvhost_dev->dev,
-				"%s: powergate failed\n",
-				__func__);
-
-	return ret;
-}
-
-static int nvavp_unpowergate_vde(struct nvavp_info *nvavp)
-{
-	int ret = 0;
-
-	dev_dbg(&nvavp->nvhost_dev->dev, "%s++\n", __func__);
-
-	/* UnPowergate VDE */
-	ret = tegra_unpowergate_partition(TEGRA_POWERGATE_VDEC);
-	if (ret)
-		dev_err(&nvavp->nvhost_dev->dev,
-				"%s: unpowergate failed\n",
-				__func__);
-
-	return ret;
-}
-
 static void nvavp_clks_enable(struct nvavp_info *nvavp)
 {
 	if (nvavp->clk_enabled++ == 0) {
-		nvhost_module_busy_ext(nvavp->nvhost_dev);
-		clk_prepare_enable(nvavp->bsev_clk);
-		clk_prepare_enable(nvavp->vde_clk);
-		nvavp_unpowergate_vde(nvavp);
+		nvhost_module_busy_ext(nvhost_get_parent(nvavp->nvhost_dev));
+		clk_enable(nvavp->bsev_clk);
+		clk_enable(nvavp->vde_clk);
 		clk_set_rate(nvavp->emc_clk, nvavp->emc_clk_rate);
 		clk_set_rate(nvavp->sclk, nvavp->sclk_rate);
 		dev_dbg(&nvavp->nvhost_dev->dev, "%s: setting sclk to %lu\n",
@@ -311,15 +258,11 @@ static void nvavp_clks_enable(struct nvavp_info *nvavp)
 static void nvavp_clks_disable(struct nvavp_info *nvavp)
 {
 	if (--nvavp->clk_enabled == 0) {
-		clk_disable_unprepare(nvavp->bsev_clk);
-		clk_disable_unprepare(nvavp->vde_clk);
+		clk_disable(nvavp->bsev_clk);
+		clk_disable(nvavp->vde_clk);
 		clk_set_rate(nvavp->emc_clk, 0);
-		if (boost_sclk)
-			clk_set_rate(nvavp->sclk, SCLK_BOOST_RATE);
-		else
-			clk_set_rate(nvavp->sclk, 0);
-		nvavp_powergate_vde(nvavp);
-		nvhost_module_idle_ext(nvavp->nvhost_dev);
+		clk_set_rate(nvavp->sclk, 0);
+		nvhost_module_idle_ext(nvhost_get_parent(nvavp->nvhost_dev));
 		dev_dbg(&nvavp->nvhost_dev->dev, "%s: resetting emc_clk "
 				"and sclk\n", __func__);
 	}
@@ -450,8 +393,8 @@ static int nvavp_reset_avp(struct nvavp_info *nvavp, unsigned long reset_addr)
 
 	writel(reset_addr, TEGRA_NVAVP_RESET_VECTOR_ADDR);
 
-	clk_prepare_enable(nvavp->sclk);
-	clk_prepare_enable(nvavp->emc_clk);
+	clk_enable(nvavp->sclk);
+	clk_enable(nvavp->emc_clk);
 
 	/* If sclk_rate and emc_clk is not set by user space,
 	 * max clock in dvfs table will be used to get best performance.
@@ -615,7 +558,6 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 	u32 gather_cmd, setucode_cmd, sync = 0;
 	u32 wordcount = 0;
 	u32 index, value = -1;
-	int ret = 0;
 
 	channel_info = nvavp_get_channel_info(nvavp, channel_id);
 
@@ -679,12 +621,14 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 	}
 
 	/* enable clocks to VDE/BSEV */
-	mutex_lock(&nvavp->open_lock);
-	if (!nvavp->pending && IS_VIDEO_CHANNEL_ID(channel_id)) {
-		nvavp_clks_enable(nvavp);
-		nvavp->pending = true;
+	if (IS_VIDEO_CHANNEL_ID(channel_id)) {
+		mutex_lock(&nvavp->open_lock);
+		if (!nvavp->pending) {
+			nvavp_clks_enable(nvavp);
+			nvavp->pending = true;
+		}
+		mutex_unlock(&nvavp->open_lock);
 	}
-	mutex_unlock(&nvavp->open_lock);
 
 	/* update put pointer */
 	channel_info->pushbuf_index = (channel_info->pushbuf_index + wordcount)&
@@ -697,17 +641,13 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 
 	if (IS_VIDEO_CHANNEL_ID(channel_id)) {
 		pr_debug("Wake up Video Channel\n");
-		ret = nvavp_outbox_write(0xA0000001);
-		if (ret < 0)
-			goto err_exit;
+		writel(0xA0000001, NVAVP_OS_OUTBOX);
 	}
 	else {
 #if defined(CONFIG_TEGRA_NVAVP_AUDIO)
 		if (IS_AUDIO_CHANNEL_ID(channel_id)) {
 			pr_debug("Wake up Audio Channel\n");
-			ret = nvavp_outbox_write(0xA0000002);
-			if (ret < 0)
-				goto err_exit;
+			writel(0xA0000002, NVAVP_OS_OUTBOX);
 		}
 #endif
 	}
@@ -717,7 +657,6 @@ static int nvavp_pushbuffer_update(struct nvavp_info *nvavp, u32 phys_addr,
 		syncpt->value = value;
 	}
 
-err_exit:
 	mutex_unlock(&channel_info->pushbuffer_lock);
 
 	return 0;
@@ -972,9 +911,9 @@ static int nvavp_os_init(struct nvavp_info *nvavp)
 		BUG();
 	}
 	dev_info(&nvavp->nvhost_dev->dev,
-		"using nvmem= carveout at %x to load AVP os\n",
+		"using nvmem= carveout at %lx to load AVP os\n",
 		nvavp->os_info.phys);
-	sprintf(fw_os_file, "nvavp_os_%08x.bin", nvavp->os_info.phys);
+	sprintf(fw_os_file, "nvavp_os_%08lx.bin", nvavp->os_info.phys);
 	nvavp->os_info.reset_addr = nvavp->os_info.phys;
 	nvavp->os_info.data = ioremap(nvavp->os_info.phys, SZ_1M);
 #endif
@@ -1035,16 +974,9 @@ err_exit:
 	return ret;
 }
 
-#define TIMER_PTV	0
-#define TIMER_EN	(1 << 31)
-#define TIMER_PERIODIC	(1 << 30)
-#define TIMER_PCR	0x4
-#define TIMER_PCR_INTR	(1 << 30)
-
 static void nvavp_uninit(struct nvavp_info *nvavp)
 {
 	int video_initialized, audio_initialized = 0;
-	unsigned int reg;
 
 	video_initialized = nvavp_get_video_init_status(nvavp);
 
@@ -1079,24 +1011,12 @@ static void nvavp_uninit(struct nvavp_info *nvavp)
 	if (video_initialized == audio_initialized) {
 		pr_debug("nvavp_uninit both channels unitialized\n");
 
-		clk_disable_unprepare(nvavp->sclk);
-		clk_disable_unprepare(nvavp->emc_clk);
+		clk_disable(nvavp->sclk);
+		clk_disable(nvavp->emc_clk);
 		disable_irq(nvavp->mbox_from_avp_pend_irq);
 		nvavp_pushbuffer_deinit(nvavp);
 		nvavp_halt_avp(nvavp);
 	}
-
-	/*
-	 * WAR: turn off TMR2 for fix LP1 wake up by TMR2.
-	 * turn off the periodic interrupt and the timer temporarily
-	 */
-	reg = readl(IO_ADDRESS(TEGRA_TMR2_BASE + TIMER_PTV));
-	reg &= ~(TIMER_EN | TIMER_PERIODIC);
-	writel(reg, IO_ADDRESS(TEGRA_TMR2_BASE + TIMER_PTV));
-
-	/* write a 1 to the intr_clr field to clear the interrupt */
-	reg = TIMER_PCR_INTR;
-	writel(reg, IO_ADDRESS(TEGRA_TMR2_BASE + TIMER_PCR));
 }
 
 static int nvavp_set_clock_ioctl(struct file *filp, unsigned int cmd,
@@ -1122,11 +1042,11 @@ static int nvavp_set_clock_ioctl(struct file *filp, unsigned int cmd,
 	if (IS_ERR_OR_NULL(c))
 		return -EINVAL;
 
-	clk_prepare_enable(c);
+	clk_enable(c);
 	clk_set_rate(c, config.rate);
 
 	config.rate = clk_get_rate(c);
-	clk_disable_unprepare(c);
+	clk_disable(c);
 	if (copy_to_user((void __user *)arg, &config, sizeof(struct nvavp_clock_args)))
 		return -EFAULT;
 
@@ -1148,9 +1068,9 @@ static int nvavp_get_clock_ioctl(struct file *filp, unsigned int cmd,
 	if (IS_ERR_OR_NULL(c))
 		return -EINVAL;
 
-	clk_prepare_enable(c);
+	clk_enable(c);
 	config.rate = clk_get_rate(c);
-	clk_disable_unprepare(c);
+	clk_disable(c);
 
 	if (copy_to_user((void __user *)arg, &config, sizeof(struct nvavp_clock_args)))
 		return -EFAULT;
@@ -1316,7 +1236,8 @@ static int nvavp_wake_avp_ioctl(struct file *filp, unsigned int cmd,
 {
 	wmb();
 	/* wake up avp */
-	return nvavp_outbox_write(0xA0000001);
+	writel(0xA0000001, NVAVP_OS_OUTBOX);
+	return 0;
 }
 
 static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
@@ -1327,14 +1248,14 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 	struct nvavp_clock_stay_on_state_args clock;
 
 	if (copy_from_user(&clock, (void __user *)arg,
-			   sizeof(struct nvavp_clock_stay_on_state_args)))
+			sizeof(struct nvavp_clock_stay_on_state_args)))
 		return -EFAULT;
 
 	dev_dbg(&nvavp->nvhost_dev->dev, "%s: state=%d\n",
 		__func__, clock.state);
 
 	if (clock.state != NVAVP_CLOCK_STAY_ON_DISABLED &&
-		   clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
+		clock.state !=  NVAVP_CLOCK_STAY_ON_ENABLED) {
 		dev_err(&nvavp->nvhost_dev->dev, "%s: invalid argument=%d\n",
 			__func__, clock.state);
 		return -EINVAL;
@@ -1346,7 +1267,7 @@ static int nvavp_force_clock_stay_on_ioctl(struct file *filp, unsigned int cmd,
 			nvavp_clks_enable(nvavp);
 	} else {
 		if (--clientctx->clk_reqs == 0)
-			nvavp_clks_disable(nvavp);
+		nvavp_clks_disable(nvavp);
 	}
 	mutex_unlock(&nvavp->open_lock);
 	return 0;
@@ -1367,9 +1288,9 @@ static int nvavp_enable_audio_clocks(struct file *filp, unsigned int cmd,
 			__func__, config.id);
 
 	if (config.id == NVAVP_MODULE_ID_VCP)
-		clk_prepare_enable(nvavp->vcp_clk);
+		clk_enable(nvavp->vcp_clk);
 	else if	(config.id == NVAVP_MODULE_ID_BSEA)
-		clk_prepare_enable(nvavp->bsea_clk);
+		clk_enable(nvavp->bsea_clk);
 
 	return 0;
 }
@@ -1388,9 +1309,9 @@ static int nvavp_disable_audio_clocks(struct file *filp, unsigned int cmd,
 			__func__, config.id);
 
 	if (config.id == NVAVP_MODULE_ID_VCP)
-		clk_disable_unprepare(nvavp->vcp_clk);
+		clk_disable(nvavp->vcp_clk);
 	else if	(config.id == NVAVP_MODULE_ID_BSEA)
-		clk_disable_unprepare(nvavp->bsea_clk);
+		clk_disable(nvavp->bsea_clk);
 
 	return 0;
 }
@@ -1434,6 +1355,7 @@ static int tegra_nvavp_open(struct inode *inode, struct file *filp, int channel_
 	if (!ret)
 		nvavp->refcount++;
 
+	clientctx->nvmap = nvavp->nvmap;
 	clientctx->nvavp = nvavp;
 
 	filp->private_data = clientctx;
@@ -1476,9 +1398,9 @@ static int tegra_nvavp_release(struct inode *inode, struct file *filp)
 		goto out;
 	}
 
-	/* if this client had any requests, drop our clk ref */
-	if (clientctx->clk_reqs)
-		nvavp_clks_disable(nvavp);
+        /* if this client had any requests, drop our clk ref */
+        if (clientctx->clk_reqs)
+                nvavp_clks_disable(nvavp);
 
 	if (nvavp->refcount > 0)
 		nvavp->refcount--;
@@ -1553,35 +1475,8 @@ static const struct file_operations tegra_audio_nvavp_fops = {
 };
 #endif
 
-static ssize_t boost_sclk_show(struct device *dev,
-	struct device_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n", boost_sclk);
-}
-
-static ssize_t boost_sclk_store(struct device *dev,
-	struct device_attribute *attr, const char *buf, size_t count)
-{
-	struct platform_device *ndev = to_platform_device(dev);
-	struct nvavp_info *nvavp = platform_get_drvdata(ndev);
-	unsigned long val = 0;
-
-	if (kstrtoul(buf, 10, &val) < 0)
-		return -EINVAL;
-
-	if (val)
-		clk_set_rate(nvavp->sclk, SCLK_BOOST_RATE);
-	else if (!val)
-		clk_set_rate(nvavp->sclk, 0);
-
-	boost_sclk = val;
-
-	return count;
-}
-
-DEVICE_ATTR(boost_sclk, S_IRUGO | S_IWUSR, boost_sclk_show, boost_sclk_store);
-
-static int tegra_nvavp_probe(struct platform_device *ndev)
+static int tegra_nvavp_probe(struct nvhost_device *ndev,
+	struct nvhost_device_id *id_table)
 {
 	struct nvavp_info *nvavp;
 	int irq;
@@ -1589,7 +1484,7 @@ static int tegra_nvavp_probe(struct platform_device *ndev)
 	u32 iovmm_addr;
 	int ret = 0, channel_id;
 
-	irq = platform_get_irq_byname(ndev, "mbox_from_nvavp_pending");
+	irq = nvhost_get_irq_byname(ndev, "mbox_from_nvavp_pending");
 	if (irq < 0) {
 		dev_err(&ndev->dev, "invalid nvhost data\n");
 		return -EINVAL;
@@ -1786,15 +1681,8 @@ static int tegra_nvavp_probe(struct platform_device *ndev)
 	}
 	disable_irq(nvavp->mbox_from_avp_pend_irq);
 
+	nvhost_set_drvdata(ndev, nvavp);
 	nvavp->nvhost_dev = ndev;
-	platform_set_drvdata(ndev, nvavp);
-
-	ret = device_create_file(&ndev->dev, &dev_attr_boost_sclk);
-	if (ret) {
-		dev_err(&ndev->dev,
-			"%s: device_create_file failed\n", __func__);
-		goto err_req_irq_pend;
-	}
 
 	return 0;
 
@@ -1838,9 +1726,9 @@ err_get_syncpt:
 	return ret;
 }
 
-static int tegra_nvavp_remove(struct platform_device *ndev)
+static int tegra_nvavp_remove(struct nvhost_device *ndev)
 {
-	struct nvavp_info *nvavp = platform_get_drvdata(ndev);
+	struct nvavp_info *nvavp = nvhost_get_drvdata(ndev);
 
 	if (!nvavp)
 		return 0;
@@ -1854,8 +1742,6 @@ static int tegra_nvavp_remove(struct platform_device *ndev)
 
 	nvavp_unload_ucode(nvavp);
 	nvavp_unload_os(nvavp);
-
-	device_remove_file(&ndev->dev, &dev_attr_boost_sclk);
 
 	misc_deregister(&nvavp->video_misc_dev);
 
@@ -1878,9 +1764,9 @@ static int tegra_nvavp_remove(struct platform_device *ndev)
 }
 
 #ifdef CONFIG_PM
-static int tegra_nvavp_suspend(struct platform_device *ndev, pm_message_t state)
+static int tegra_nvavp_suspend(struct nvhost_device *ndev, pm_message_t state)
 {
-	struct nvavp_info *nvavp = platform_get_drvdata(ndev);
+	struct nvavp_info *nvavp = nvhost_get_drvdata(ndev);
 	int ret = 0;
 
 	mutex_lock(&nvavp->open_lock);
@@ -1901,18 +1787,13 @@ static int tegra_nvavp_suspend(struct platform_device *ndev, pm_message_t state)
 		}
 	}
 
-	/* Partition vde has to be left on before suspend for the
-	 * device to wakeup on resume
-	 */
-	nvavp_unpowergate_vde(nvavp);
-
 	mutex_unlock(&nvavp->open_lock);
 	return ret;
 }
 
-static int tegra_nvavp_resume(struct platform_device *ndev)
+static int tegra_nvavp_resume(struct nvhost_device *ndev)
 {
-	struct nvavp_info *nvavp = platform_get_drvdata(ndev);
+	struct nvavp_info *nvavp = nvhost_get_drvdata(ndev);
 
 	mutex_lock(&nvavp->open_lock);
 
@@ -1928,7 +1809,7 @@ static int tegra_nvavp_resume(struct platform_device *ndev)
 }
 #endif
 
-static struct platform_driver tegra_nvavp_driver = {
+static struct nvhost_driver tegra_nvavp_driver = {
 	.driver	= {
 		.name	= TEGRA_NVAVP_NAME,
 		.owner	= THIS_MODULE,
@@ -1943,12 +1824,12 @@ static struct platform_driver tegra_nvavp_driver = {
 
 static int __init tegra_nvavp_init(void)
 {
-	return platform_driver_register(&tegra_nvavp_driver);
+	return nvhost_driver_register(&tegra_nvavp_driver);
 }
 
 static void __exit tegra_nvavp_exit(void)
 {
-	platform_driver_unregister(&tegra_nvavp_driver);
+	nvhost_driver_unregister(&tegra_nvavp_driver);
 }
 
 module_init(tegra_nvavp_init);

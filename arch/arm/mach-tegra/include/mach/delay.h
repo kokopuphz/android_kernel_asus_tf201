@@ -20,22 +20,22 @@
 #define __MACH_TEGRA_DELAY_H
 
 /* needed by loops_per_jiffy calculations */
-extern void __delay(int loops);
+//extern void __delay(int loops);
 
-extern void __udelay(unsigned long usecs);
-extern void __const_udelay(unsigned long usecs);
+//extern void __udelay(unsigned long usecs);
+//extern void __const_udelay(unsigned long usecs);
 
 /* we don't have any restrictions on maximum udelay length, but we'll enforce
  * the same restriction as the ARM default so we don't introduce any
  * incompatibilties in drivers.
  */
 extern void __bad_udelay(void);
-
+/*
 #define MAX_UDELAY_MS 2
 
 #define udelay(n)							\
 	((__builtin_constant_p(n) && (n) > (MAX_UDELAY_MS * 1000)) ?	\
 		__bad_udelay() :					\
 		__udelay(n))
-
+*/
 #endif /* defined(__MACH_TEGRA_DELAY_H) */

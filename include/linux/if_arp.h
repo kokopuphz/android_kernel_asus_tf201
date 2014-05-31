@@ -60,6 +60,10 @@
 #define ARPHRD_DDCMP    517		/* Digital's DDCMP protocol     */
 #define ARPHRD_RAWHDLC	518		/* Raw HDLC			*/
 
+#ifdef CONFIG_MACH_ENDEAVORU
+#define ARPHRD_RAWIP	530		/* Raw IP			*/
+#endif
+
 #define ARPHRD_TUNNEL	768		/* IPIP tunnel			*/
 #define ARPHRD_TUNNEL6	769		/* IP6IP6 tunnel       		*/
 #define ARPHRD_FRAD	770             /* Frame Relay Access Device    */

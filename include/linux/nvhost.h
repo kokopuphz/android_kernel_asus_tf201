@@ -25,8 +25,6 @@
 
 #include <linux/device.h>
 #include <linux/types.h>
-#include <linux/devfreq.h>
-#include <linux/platform_device.h>
 
 struct nvhost_master;
 struct nvhost_hwctx;
@@ -46,9 +44,6 @@ struct nvhost_device_power_attr;
  * So if someone decides to add new sync point in future
  * please check both the header files
  */
-#define NVSYNCPT_DISP0_D		(5)
-#define NVSYNCPT_DISP0_H		(6)
-#define NVSYNCPT_DISP1_H		(7)
 #define NVSYNCPT_DISP0_A		(8)
 #define NVSYNCPT_DISP1_A		(9)
 #define NVSYNCPT_AVP_0			(10)
@@ -67,12 +62,14 @@ enum nvhost_power_sysfs_attributes {
 	NVHOST_POWER_SYSFS_ATTRIB_MAX
 };
 
+struct nvhost_device_id {
+	char name[NVHOST_NAME_SIZE];
+	unsigned long version;
+};
+
 struct nvhost_clock {
 	char *name;
-	unsigned long default_rate;
-	u32 moduleid;
-	int reset;
-	unsigned long devfreq_rate;
+	long default_rate;
 };
 
 enum nvhost_device_powerstate_t {
@@ -82,10 +79,14 @@ enum nvhost_device_powerstate_t {
 	NVHOST_POWER_STATE_POWERGATED
 };
 
-struct nvhost_device_data {
+struct nvhost_device {
+	const char	*name;		/* device name */
 	int		version;	/* ip version number of device */
+	struct device	dev;		/* Linux device struct */
 	int		id;		/* Separates clients of same hw */
 	int		index;		/* Hardware channel number */
+	u32		num_resources;	/* Number of resources following */
+	struct resource	*resource;	/* Resources (IOMEM in particular) */
 	struct resource	*reg_mem;
 	void __iomem	*aperture;	/* Iomem mapped to kernel */
 
@@ -119,79 +120,104 @@ struct nvhost_device_data {
 	struct nvhost_channel *channel;	/* Channel assigned for the module */
 	struct kobject *power_kobj;	/* kobject to hold power sysfs entries */
 	struct nvhost_device_power_attr *power_attrib;	/* sysfs attributes */
-	struct devfreq	*power_manager;	/* Device power management */
-	struct dentry *debugfs;		/* debugfs directory */
+};
 
-	void *private_data;		/* private platform data */
-	struct platform_device *pdev;	/* owner platform_device */
+struct nvhost_device_power_attr {
+	struct nvhost_device *ndev;
+	struct kobj_attribute power_attr[NVHOST_POWER_SYSFS_ATTRIB_MAX];
+};
+
+/* Register devices to nvhost bus */
+extern int nvhost_add_devices(struct nvhost_device **, int num);
+
+/* Register device to nvhost bus */
+extern int nvhost_device_register(struct nvhost_device *);
+
+/* Deregister device from nvhost bus */
+extern void nvhost_device_unregister(struct nvhost_device *);
+
+extern struct bus_type nvhost_bus_type;
+
+struct nvhost_driver {
+	int (*probe)(struct nvhost_device *, struct nvhost_device_id *);
+	int (*remove)(struct nvhost_device *);
+	void (*shutdown)(struct nvhost_device *);
+	int (*suspend)(struct nvhost_device *, pm_message_t state);
+	int (*resume)(struct nvhost_device *);
+	struct device_driver driver;
+
+	struct nvhost_device_id *id_table;
 
 	/* Finalize power on. Can be used for context restore. */
-	void (*finalize_poweron)(struct platform_device *dev);
+	void (*finalize_poweron)(struct nvhost_device *dev);
 
 	/* Device is busy. */
-	void (*busy)(struct platform_device *);
+	void (*busy)(struct nvhost_device *);
 
 	/* Device is idle. */
-	void (*idle)(struct platform_device *);
+	void (*idle)(struct nvhost_device *);
 
 	/* Device is going to be suspended */
-	void (*suspend_ndev)(struct platform_device *);
-
-	/* Scaling init is run on device registration */
-	void (*scaling_init)(struct platform_device *dev);
-
-	/* Scaling deinit is called on device unregistration */
-	void (*scaling_deinit)(struct platform_device *dev);
+	void (*suspend_ndev)(struct nvhost_device *);
 
 	/* Device is initialized */
-	void (*init)(struct platform_device *dev);
+	void (*init)(struct nvhost_device *dev);
 
 	/* Device is de-initialized. */
-	void (*deinit)(struct platform_device *dev);
+	void (*deinit)(struct nvhost_device *dev);
 
 	/* Preparing for power off. Used for context save. */
-	int (*prepare_poweroff)(struct platform_device *dev);
+	int (*prepare_poweroff)(struct nvhost_device *dev);
 
 	/* Allocates a context handler for the device */
 	struct nvhost_hwctx_handler *(*alloc_hwctx_handler)(u32 syncpt,
 			u32 waitbase, struct nvhost_channel *ch);
 
-	/* Clock gating callbacks */
-	int (*prepare_clockoff)(struct platform_device *dev);
-	void (*finalize_clockon)(struct platform_device *dev);
-
 	/* Read module register into memory */
-	int (*read_reg)(struct platform_device *dev,
+	int (*read_reg)(struct nvhost_device *dev,
 			struct nvhost_channel *ch,
 			struct nvhost_hwctx *hwctx,
 			u32 offset,
 			u32 *value);
+
+	/* Clock gating callbacks */
+	int (*prepare_clockoff)(struct nvhost_device *dev);
+	void (*finalize_clockon)(struct nvhost_device *dev);
 };
 
-struct nvhost_devfreq_ext_stat {
-	int		busy;
-	unsigned long	max_freq;
-	unsigned long	min_freq;
-};
+extern int nvhost_driver_register(struct nvhost_driver *);
+extern void nvhost_driver_unregister(struct nvhost_driver *);
+extern struct resource *nvhost_get_resource(struct nvhost_device *,
+		unsigned int, unsigned int);
+extern int nvhost_get_irq(struct nvhost_device *, unsigned int);
+extern struct resource *nvhost_get_resource_byname(struct nvhost_device *,
+		unsigned int, const char *);
+extern int nvhost_get_irq_byname(struct nvhost_device *, const char *);
 
-struct nvhost_device_power_attr {
-	struct platform_device *ndev;
-	struct kobj_attribute power_attr[NVHOST_POWER_SYSFS_ATTRIB_MAX];
-};
+#define to_nvhost_device(x)	container_of((x), struct nvhost_device, dev)
+#define to_nvhost_driver(drv)	(container_of((drv), struct nvhost_driver, \
+				 driver))
 
-void nvhost_device_writel(struct platform_device *dev, u32 r, u32 v);
-u32 nvhost_device_readl(struct platform_device *dev, u32 r);
+#define nvhost_get_drvdata(_dev)	dev_get_drvdata(&(_dev)->dev)
+#define nvhost_set_drvdata(_dev, data)	dev_set_drvdata(&(_dev)->dev, (data))
+
+int nvhost_bus_add_host(struct nvhost_master *host);
+
+static inline struct nvhost_device *nvhost_get_parent(struct nvhost_device *_dev)
+{
+	return _dev->dev.parent ? to_nvhost_device(_dev->dev.parent) : NULL;
+}
 
 /* public host1x power management APIs */
-bool nvhost_module_powered_ext(struct platform_device *dev);
-void nvhost_module_busy_ext(struct platform_device *dev);
-void nvhost_module_idle_ext(struct platform_device *dev);
+bool nvhost_module_powered_ext(struct nvhost_device *dev);
+void nvhost_module_busy_ext(struct nvhost_device *dev);
+void nvhost_module_idle_ext(struct nvhost_device *dev);
 
 /* public host1x sync-point management APIs */
-u32 nvhost_syncpt_incr_max_ext(struct platform_device *dev, u32 id, u32 incrs);
-void nvhost_syncpt_cpu_incr_ext(struct platform_device *dev, u32 id);
-u32 nvhost_syncpt_read_ext(struct platform_device *dev, u32 id);
-int nvhost_syncpt_wait_timeout_ext(struct platform_device *dev, u32 id, u32 thresh,
+u32 nvhost_syncpt_incr_max_ext(struct nvhost_device *dev, u32 id, u32 incrs);
+void nvhost_syncpt_cpu_incr_ext(struct nvhost_device *dev, u32 id);
+u32 nvhost_syncpt_read_ext(struct nvhost_device *dev, u32 id);
+int nvhost_syncpt_wait_timeout_ext(struct nvhost_device *dev, u32 id, u32 thresh,
 	u32 timeout, u32 *value);
 
 void nvhost_scale3d_set_throughput_hint(int hint);

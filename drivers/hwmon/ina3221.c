@@ -35,7 +35,6 @@
 #include <linux/hwmon-sysfs.h>
 #include <linux/hwmon.h>
 #include <linux/cpu.h>
-#include <linux/cpufreq.h>
 
 #include "linux/ina3221.h"
 
@@ -57,7 +56,6 @@
 #define shuntv_register_to_uv(x) ((x >> 3) * 40)
 
 #define CPU_THRESHOLD 2
-#define CPU_FREQ_THRESHOLD 1000000
 
 struct ina3221_data {
 	struct device *hwmon_dev;
@@ -66,9 +64,7 @@ struct ina3221_data {
 	struct mutex mutex;
 	u8 mode;
 	struct notifier_block nb;
-	struct notifier_block nb2;
 	int shutdown_complete;
-	int is_suspended;
 };
 
 static s32 __locked_power_down_ina3221(struct i2c_client *client)
@@ -321,6 +317,7 @@ static s32 show_power(struct device *dev,
 		if (ret < 0)
 			goto error;
 	}
+
 	DEBUG_INA3221(("%s power = %d\n", __func__, power_mW));
 	mutex_unlock(&data->mutex);
 	return sprintf(buf, "%d mW\n", power_mW);
@@ -372,83 +369,6 @@ error:
 	return ret;
 }
 
-static int __locked_ina3221_switch(struct ina3221_data *data,
-		struct i2c_client *client,
-		int cpus, int cpufreq)
-{
-	int ret = 0;
-	if ((data->mode == TRIGGERED) &&
-		((cpus >= CPU_THRESHOLD) ||
-		(cpufreq >= CPU_FREQ_THRESHOLD))) {
-		/**
-		 * Turn INA on when cpu frequency crosses threshold or number of cpus
-		 * crosses threshold
-		 */
-		DEBUG_INA3221(("Turning on ina3221, cpus:%d, cpufreq:%d\n",
-					cpus, cpufreq));
-		ret = __locked_power_up_ina3221(client,
-				data->plat_data->cont_conf_data);
-		if (ret < 0) {
-			dev_err(&client->dev,
-					"INA can't be turned on: 0x%x\n", ret);
-			return ret;
-		}
-		data->mode = CONTINUOUS;
-		return ret;
-	} else if ((data->mode == CONTINUOUS) &&
-			 (cpus < CPU_THRESHOLD) &&
-			(cpufreq < CPU_FREQ_THRESHOLD)) {
-		/*
-		 * Turn off ina when number of cpu cores on are below threshold
-		 * and cpu frequency are below threshold
-		 */
-		DEBUG_INA3221(("Turning off ina3221, cpus:%d, cpufreq:%d\n",
-				cpus, cpufreq));
-		ret = __locked_power_down_ina3221(client);
-		if (ret < 0) {
-			dev_err(&client->dev,
-					"INA can't be turned off: 0x%x\n", ret);
-			return ret;
-		}
-		data->mode = TRIGGERED;
-		return ret;
-	} else {
-		return ret;
-	}
-}
-
-static int ina3221_cpufreq_notify(struct notifier_block *nb,
-					unsigned long event,
-					void *hcpu)
-{
-	int ret = 0;
-	int cpufreq;
-	int cpus;
-	struct ina3221_data *data = container_of(nb, struct ina3221_data, nb2);
-	struct i2c_client *client = data->client;
-	if (event == CPUFREQ_POSTCHANGE) {
-		mutex_lock(&data->mutex);
-		if (data->is_suspended || data->shutdown_complete) {
-			mutex_unlock(&data->mutex);
-			return 0;
-		}
-		cpufreq = ((struct cpufreq_freqs *)hcpu)->new;
-		cpus = num_online_cpus();
-		DEBUG_INA3221(("***INA3221 CPUfreq notified freq:%d cpus:%d\n",
-						cpufreq, cpus));
-		ret = __locked_ina3221_switch(data, client, cpus, cpufreq);
-		if (ret < 0)
-			goto error;
-		mutex_unlock(&data->mutex);
-		return 0;
-	} else
-		return 0;
-error:
-	mutex_unlock(&data->mutex);
-	dev_err(&client->dev, "INA can't be turned off/on: 0x%x\n", ret);
-	return 0;
-}
-
 static int ina3221_hotplug_notify(struct notifier_block *nb,
 					unsigned long event,
 					void *hcpu)
@@ -458,24 +378,44 @@ static int ina3221_hotplug_notify(struct notifier_block *nb,
 	struct i2c_client *client = data->client;
 	int cpus;
 	int ret = 0;
-	int cpufreq = 0;
 	if (event == CPU_ONLINE || event == CPU_DEAD) {
 		mutex_lock(&data->mutex);
-		if (data->is_suspended || data->shutdown_complete) {
-			mutex_unlock(&data->mutex);
-			return 0;
-		}
-		cpufreq = cpufreq_quick_get(0);
 		cpus = num_online_cpus();
-		DEBUG_INA3221(("INA3221 hotplug notified cpufreq:%d cpus:%d\n",
-				cpufreq, cpus));
-		ret = __locked_ina3221_switch(data, client, cpus, cpufreq);
-		if (ret < 0)
-			goto error;
+		DEBUG_INA3221(("INA3221 got CPU notification %d\n", cpus));
+		if ((cpus >= CPU_THRESHOLD) && (data->mode == TRIGGERED)) {
+			/**
+			 * Turn INA on when number of cpu
+			 * cores crosses threshold
+			 */
+			ret = __locked_power_up_ina3221(client,
+					data->plat_data->cont_conf_data);
+			DEBUG_INA3221(("Turning on ina3221, cpus:%d\n", cpus));
+			if (ret < 0) {
+				dev_err(&client->dev,
+					"INA can't be turned on: 0x%x\n", ret);
+				goto error;
+			}
+			data->mode = CONTINUOUS;
+		} else if ((cpus < CPU_THRESHOLD) &&
+						(data->mode == CONTINUOUS)) {
+			/**
+			 * Turn off ina when number of cpu
+			 * cores on are below threshold
+			 */
+			ret = __locked_power_down_ina3221(client);
+			DEBUG_INA3221(("Turning off INA3221 cpus%d\n", cpus));
+			if (ret < 0) {
+				dev_err(&client->dev,
+					"INA can't be turned off: 0x%x\n", ret);
+				goto error;
+			}
+			data->mode = TRIGGERED;
+		}
 		mutex_unlock(&data->mutex);
 		return 0;
 	} else
 		return 0;
+
 error:
 	mutex_unlock(&data->mutex);
 	dev_err(&client->dev, "INA can't be turned off/on: 0x%x\n", ret);
@@ -523,7 +463,6 @@ static int __devinit ina3221_probe(struct i2c_client *client,
 
 	data->mode = TRIGGERED;
 	data->shutdown_complete = 0;
-	data->is_suspended = 0;
 	/* reset ina3221 */
 	ret = i2c_smbus_write_word_data(client, INA3221_CONFIG,
 		__constant_cpu_to_be16((INA3221_RESET)));
@@ -542,9 +481,8 @@ static int __devinit ina3221_probe(struct i2c_client *client,
 	}
 	data->client = client;
 	data->nb.notifier_call = ina3221_hotplug_notify;
-	data->nb2.notifier_call = ina3221_cpufreq_notify;
 	register_hotcpu_notifier(&(data->nb));
-	cpufreq_register_notifier(&(data->nb2), CPUFREQ_TRANSITION_NOTIFIER);
+
 	data->hwmon_dev = hwmon_device_register(&client->dev);
 	if (IS_ERR(data->hwmon_dev)) {
 		ret = PTR_ERR(data->hwmon_dev);
@@ -576,7 +514,6 @@ static int __devexit ina3221_remove(struct i2c_client *client)
 	hwmon_device_unregister(data->hwmon_dev);
 	mutex_unlock(&data->mutex);
 	unregister_hotcpu_notifier(&(data->nb));
-	cpufreq_unregister_notifier(&(data->nb2), CPUFREQ_TRANSITION_NOTIFIER);
 	for (i = 0; i < ARRAY_SIZE(ina3221); i++)
 		device_remove_file(&client->dev, &ina3221[i].dev_attr);
 	return 0;
@@ -591,66 +528,16 @@ static void ina3221_shutdown(struct i2c_client *client)
 	mutex_unlock(&data->mutex);
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int ina3221_suspend(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct ina3221_data *data = i2c_get_clientdata(client);
-	s32 ret = 0;
-	mutex_lock(&data->mutex);
-	ret = __locked_power_down_ina3221(client);
-	if (ret < 0) {
-		dev_err(&client->dev,
-			"INA can't be turned off: 0x%x\n", ret);
-		goto error;
-	}
-	data->mode = TRIGGERED;
-	data->is_suspended = 1;
-error:
-	mutex_unlock(&data->mutex);
-	return ret;
-}
-
-static int ina3221_resume(struct device *dev)
-{
-	int cpufreq, cpus, ret;
-	struct i2c_client *client = to_i2c_client(dev);
-	struct ina3221_data *data = i2c_get_clientdata(client);
-	mutex_lock(&data->mutex);
-	cpufreq = cpufreq_quick_get(0);
-	cpus = num_online_cpus();
-	ret = __locked_ina3221_switch(data, client, cpus, cpufreq);
-	if (ret < 0)
-		dev_err(&client->dev,
-			"INA can't be turned off/on: 0x%x\n", ret);
-
-	data->is_suspended = 0;
-	mutex_unlock(&data->mutex);
-	return ret;
-}
-#endif
-
 static const struct i2c_device_id ina3221_id[] = {
 	{DRIVER_NAME, 0 },
 	{}
 };
 MODULE_DEVICE_TABLE(i2c, ina3221_id);
 
-#ifdef CONFIG_PM_SLEEP
-static const struct dev_pm_ops ina3221_pm_ops = {
-	SET_SYSTEM_SLEEP_PM_OPS(ina3221_suspend,
-				ina3221_resume)
-};
-#endif
-
 static struct i2c_driver ina3221_driver = {
 	.class		= I2C_CLASS_HWMON,
 	.driver = {
 		.name	= DRIVER_NAME,
-		.owner = THIS_MODULE,
-#ifdef CONFIG_PM_SLEEP
-		.pm = &ina3221_pm_ops,
-#endif
 	},
 	.probe		= ina3221_probe,
 	.remove		= __devexit_p(ina3221_remove),

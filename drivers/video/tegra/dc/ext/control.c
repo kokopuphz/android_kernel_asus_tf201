@@ -42,23 +42,21 @@ get_output_properties(struct tegra_dc_ext_control_output_properties *properties)
 	if (properties->handle > 2)
 		return -EINVAL;
 
-	properties->associated_head = properties->handle;
-	properties->head_mask = (1 << properties->associated_head);
-
-	dc = tegra_dc_get_dc(properties->associated_head);
-	switch (tegra_dc_get_out(dc)) {
-	case TEGRA_DC_OUT_DSI:
-		properties->type = TEGRA_DC_EXT_DSI;
-		break;
-	case TEGRA_DC_OUT_RGB:
+	switch (properties->handle) {
+	case 0:
 		properties->type = TEGRA_DC_EXT_LVDS;
 		break;
-	case TEGRA_DC_OUT_HDMI:
+	case 1:
 		properties->type = TEGRA_DC_EXT_HDMI;
 		break;
 	default:
 		return -EINVAL;
 	}
+
+	properties->associated_head = properties->handle;
+	properties->head_mask = (1 << properties->associated_head);
+
+	dc = tegra_dc_get_dc(properties->associated_head);
 	properties->connected = tegra_dc_get_connected(dc);
 
 	return 0;
@@ -76,8 +74,8 @@ static int get_output_edid(struct tegra_dc_ext_control_output_edid *edid)
 		return -EINVAL;
 
 	dc = tegra_dc_get_dc(edid->handle);
-
-	dc_edid = tegra_dc_get_edid(dc);
+	if (dc)
+		dc_edid = tegra_dc_get_edid(dc);
 	if (IS_ERR(dc_edid))
 		return PTR_ERR(dc_edid);
 
@@ -264,7 +262,7 @@ int tegra_dc_ext_control_init(void)
 		return ret;
 
 	control->dev = device_create(tegra_dc_ext_class,
-	     NULL, tegra_dc_ext_devno, NULL, "tegra_dc_ctrl");
+			NULL, tegra_dc_ext_devno, NULL, "tegra_dc_ctrl");
 	if (IS_ERR(control->dev)) {
 		ret = PTR_ERR(control->dev);
 		cdev_del(&control->cdev);

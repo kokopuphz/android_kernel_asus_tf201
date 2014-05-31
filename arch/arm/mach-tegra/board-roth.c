@@ -44,17 +44,14 @@
 #include <linux/leds.h>
 #include <linux/leds_pwm.h>
 #include <linux/i2c/at24.h>
-#include <linux/issp.h>
 #include <linux/of_platform.h>
-#include <asm/system_info.h>
 #include <asm/hardware/gic.h>
-#include <mach/hardware.h>
 
 #include <mach/clk.h>
 #include <mach/iomap.h>
 #include <mach/irqs.h>
 #include <mach/pinmux.h>
-#include <mach/pinmux-t11.h>
+#include <mach/pinmux-tegra30.h>
 #include <mach/iomap.h>
 #include <mach/io.h>
 #include <mach/io_dpd.h>
@@ -66,7 +63,6 @@
 #include <mach/gpio-tegra.h>
 #include <mach/tegra_fiq_debugger.h>
 #include <mach/edp.h>
-#include <mach/hardware.h>
 
 #include "board.h"
 #include "board-common.h"
@@ -76,7 +72,6 @@
 #include "gpio-names.h"
 #include "fuse.h"
 #include "pm.h"
-#include "pm-irq.h"
 #include "common.h"
 #include "tegra-board-id.h"
 #include "board-touch-raydium.h"
@@ -182,7 +177,7 @@ static __initdata struct tegra_clk_init_table roth_clk_init_table[] = {
 	{ "pll_m",	NULL,		0,		false},
 	{ "hda",	"pll_p",	108000000,	false},
 	{ "hda2codec_2x", "pll_p",	48000000,	false},
-	{ "pwm",	"pll_p",	6000000,	false},
+	{ "pwm",	"pll_p",	37000000,	false},
 	{ "blink",	"clk_32k",	32768,		true},
 	{ "i2s1",	"pll_a_out0",	0,		false},
 	{ "i2s3",	"pll_a_out0",	0,		false},
@@ -404,54 +399,56 @@ static struct platform_device tegra_camera = {
 	.id = -1,
 };
 
-
-static struct issp_platform_data roth_issp_pdata_p2454 = {
-	.reset_gpio	= TEGRA_GPIO_PH4,
-	.data_gpio	= TEGRA_GPIO_PH6,
-	.clk_gpio	= TEGRA_GPIO_PH7,
-	.fw_name	= "p2454-uc.fw",
-	.si_id		= {0x00, 0xA2, 0x52, 0x21}, /* CY7C64345 */
-	.block_size	= 128,
-	.blocks		= 128,
-	.security_size	= 64,
-	.version_addr	= 0x0286,
-	.force_update	= 1,
-};
-
-static struct platform_device roth_issp_device_p2454 = {
-	.name	= "issp",
-	.dev	= {
-		.platform_data = &roth_issp_pdata_p2454,
+#ifdef CONFIG_LEDS_PWM
+static struct led_pwm roth_led_info[] = {
+	{
+		.name			= "roth-led",
+		.default_trigger	= "none",
+		.pwm_id			= 2,
+		.active_low		= 0,
+		.max_brightness		= 255,
+		.pwm_period_ns		= 10000000,
 	},
 };
 
-static struct issp_platform_data roth_issp_pdata_p2560 = {
-	.reset_gpio	= TEGRA_GPIO_PH4,
-	.data_gpio	= TEGRA_GPIO_PH6,
-	.clk_gpio	= TEGRA_GPIO_PH7,
-	.fw_name	= "p2560-uc.fw",
-	.si_id		= {0x00, 0xA2, 0x52, 0x21}, /* CY7C64345 */
-	.block_size	= 128,
-	.blocks		= 128,
-	.security_size	= 64,
-	.version_addr	= 0x0286,
-	.force_update	= 1,
+static struct led_pwm_platform_data roth_leds_pdata = {
+	.leds		= roth_led_info,
+	.num_leds	= ARRAY_SIZE(roth_led_info),
 };
 
-static struct platform_device roth_issp_device_p2560 = {
-	.name	= "issp",
+static struct platform_device roth_leds_pwm_device = {
+	.name	= "leds_pwm",
+	.id	= -1,
 	.dev	= {
-		.platform_data = &roth_issp_pdata_p2560,
+		.platform_data = &roth_leds_pdata,
 	},
 };
 
-static void __init roth_issp_init(void)
-{
-	if (system_rev == P2454)
-		platform_device_register(&roth_issp_device_p2454);
-	else
-		platform_device_register(&roth_issp_device_p2560);
-}
+#else
+static struct gpio_led roth_led_info[] = {
+	{
+		.name			= "roth-led",
+		.default_trigger	= "none",
+		.gpio			= TEGRA_GPIO_PQ3,
+		.active_low		= 0,
+		.retain_state_suspended	= 0,
+		.default_state		= LEDS_GPIO_DEFSTATE_OFF,
+	},
+};
+
+static struct gpio_led_platform_data roth_leds_pdata = {
+	.leds		= roth_led_info,
+	.num_leds	= ARRAY_SIZE(roth_led_info),
+};
+
+static struct platform_device roth_leds_gpio_device = {
+	.name	= "leds-gpio",
+	.id	= -1,
+	.dev	= {
+		.platform_data = &roth_leds_pdata,
+	},
+};
+#endif
 
 static struct platform_device *roth_devices[] __initdata = {
 	&tegra_pmu_device,
@@ -483,6 +480,13 @@ static struct platform_device *roth_devices[] __initdata = {
 #if defined(CONFIG_CRYPTO_DEV_TEGRA_AES)
 	&tegra_aes_device,
 #endif
+
+#if CONFIG_LEDS_PWM
+	&tegra_pwfm2_device,
+	&roth_leds_pwm_device,
+#else
+	&roth_leds_gpio_device,
+#endif
 };
 
 #ifdef CONFIG_USB_SUPPORT
@@ -502,12 +506,11 @@ static struct tegra_usb_platform_data tegra_udc_pdata = {
 		.elastic_limit = 16,
 		.idle_wait_delay = 17,
 		.term_range_adj = 6,
-		.xcvr_setup = 7,
+		.xcvr_setup = 8,
 		.xcvr_lsfslew = 2,
 		.xcvr_lsrslew = 2,
 		.xcvr_setup_offset = 0,
-		.xcvr_use_fuses = 0,
-		.xcvr_use_lsb = 1,
+		.xcvr_use_fuses = 1,
 	},
 };
 
@@ -528,12 +531,11 @@ static struct tegra_usb_platform_data tegra_ehci1_utmi_pdata = {
 		.elastic_limit = 16,
 		.idle_wait_delay = 17,
 		.term_range_adj = 6,
-		.xcvr_setup = 7,
+		.xcvr_setup = 15,
 		.xcvr_lsfslew = 2,
 		.xcvr_lsrslew = 2,
 		.xcvr_setup_offset = 0,
-		.xcvr_use_fuses = 0,
-		.xcvr_use_lsb = 1,
+		.xcvr_use_fuses = 1,
 		.vbus_oc_map = 0x4,
 	},
 };
@@ -555,11 +557,11 @@ static struct tegra_usb_platform_data tegra_ehci3_utmi_pdata = {
 		.elastic_limit = 16,
 		.idle_wait_delay = 17,
 		.term_range_adj = 6,
-		.xcvr_setup = 0xb,
+		.xcvr_setup = 8,
 		.xcvr_lsfslew = 2,
 		.xcvr_lsrslew = 2,
 		.xcvr_setup_offset = 0,
-		.xcvr_use_fuses = 0,
+		.xcvr_use_fuses = 1,
 		.vbus_oc_map = 0x5,
 	},
 };
@@ -569,54 +571,6 @@ static struct tegra_usb_otg_data tegra_otg_pdata = {
 	.ehci_pdata = &tegra_ehci1_utmi_pdata,
 };
 
-static struct platform_device *
-tegra_usb_hsic_host_register(struct platform_device *ehci_dev)
-{
-	struct platform_device *pdev;
-	int val;
-
-	pdev = platform_device_alloc(ehci_dev->name, ehci_dev->id);
-	if (!pdev)
-		return NULL;
-
-	val = platform_device_add_resources(pdev, ehci_dev->resource,
-						ehci_dev->num_resources);
-	if (val)
-		goto error;
-
-	pdev->dev.dma_mask =  ehci_dev->dev.dma_mask;
-	pdev->dev.coherent_dma_mask = ehci_dev->dev.coherent_dma_mask;
-
-	val = platform_device_add_data(pdev, &tegra_ehci3_utmi_pdata,
-			sizeof(struct tegra_usb_platform_data));
-	if (val)
-		goto error;
-
-	val = platform_device_add(pdev);
-	if (val)
-		goto error;
-
-	return pdev;
-
-error:
-	pr_err("%s: failed to add the host contoller device\n", __func__);
-	platform_device_put(pdev);
-	return NULL;
-}
-
-static void tegra_usb_hsic_host_unregister(struct platform_device **platdev)
-{
-	struct platform_device *pdev = *platdev;
-
-	if (pdev && &pdev->dev) {
-		platform_device_unregister(pdev);
-		*platdev = NULL;
-	} else
-		pr_err("%s: no platform device\n", __func__);
-}
-
-static struct platform_device *roth_usb_ehci3;
-
 static void roth_usb_init(void)
 {
 	tegra_otg_device.dev.platform_data = &tegra_otg_pdata;
@@ -625,28 +579,10 @@ static void roth_usb_init(void)
 	/* Setup the udc platform data */
 	tegra_udc_device.dev.platform_data = &tegra_udc_pdata;
 
-#if 0
 	tegra_ehci3_device.dev.platform_data = &tegra_ehci3_utmi_pdata;
 	platform_device_register(&tegra_ehci3_device);
-#else
-	roth_usb_ehci3 = tegra_usb_hsic_host_register(&tegra_ehci3_device);
-#endif
 }
 
-void roth_usb_unload(void)
-{
-	pr_info("%s\n", __func__);
-
-	/* unload ehci3 usb host controller */
-	tegra_usb_hsic_host_unregister(&roth_usb_ehci3);
-
-}
-
-void roth_usb_reload(void)
-{
-	pr_info("%s\n", __func__);
-	roth_usb_ehci3 = tegra_usb_hsic_host_register(&tegra_ehci3_device);
-}
 #else
 static void roth_usb_init(void) { }
 #endif
@@ -677,6 +613,7 @@ struct spi_clk_parent spi_parent_clk_roth[] = {
 };
 
 static struct tegra_spi_platform_data roth_spi_pdata = {
+	.is_dma_based           = false,
 	.max_dma_buffer         = 16 * 1024,
 	.is_clkon_always        = false,
 	.max_rate               = 25000000,
@@ -699,8 +636,6 @@ static void __init roth_spi_init(void)
 	}
 	roth_spi_pdata.parent_clk_list = spi_parent_clk_roth;
 	roth_spi_pdata.parent_clk_count = ARRAY_SIZE(spi_parent_clk_roth);
-	roth_spi_pdata.is_dma_based = (tegra_revision == TEGRA_REVISION_A01) ?
-					false : true;
 	tegra11_spi_device4.dev.platform_data = &roth_spi_pdata;
 	platform_add_devices(roth_spi_devices,
 		ARRAY_SIZE(roth_spi_devices));
@@ -716,7 +651,7 @@ static __initdata struct tegra_clk_init_table touch_clk_init_table[] = {
 struct rm_spi_ts_platform_data rm31080ts_roth_data = {
 	.gpio_reset = 0,
 	.config = 0,
-	.platform_id = RM_PLATFORM_R005,
+	.platform_id = RM_PLATFORM_D010,
 	.name_of_clock = "clk_out_2",
 	.name_of_clock_con = "extern2",
 };
@@ -740,34 +675,8 @@ struct spi_board_info rm31080a_roth_spi_board[1] = {
 
 static int __init roth_touch_init(void)
 {
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
-	if (board_info.board_id == BOARD_P2560) {
-		int touch_id = tegra_get_touch_panel_id();
-		if (touch_id == PANEL_TPK || touch_id == PANEL_WINTEK) {
-			int err;
-			err = gpio_request(TOUCH_GPIO_CLK, "touch-gpio-clk");
-			if (err < 0)
-				pr_err("%s: gpio_request failed %d\n",
-					__func__, err);
-			else {
-				err = gpio_direction_output(TOUCH_GPIO_CLK, 0);
-				if (err < 0)
-					pr_err("%s: set output failed %d\n",
-					__func__, err);
-				gpio_free(TOUCH_GPIO_CLK);
-			}
-			tegra_pinmux_set_pullupdown(TOUCH_GPIO_CLK_PG,
-							TEGRA_PUPD_NORMAL);
-			tegra_pinmux_set_tristate(TOUCH_GPIO_CLK_PG,
-							TEGRA_TRI_TRISTATE);
-			rm31080ts_roth_data.name_of_clock = NULL;
-			rm31080ts_roth_data.name_of_clock_con = NULL;
-		} else
-			tegra_clk_init_from_table(touch_clk_init_table);
-	} else
-		tegra_clk_init_from_table(touch_clk_init_table);
+	tegra_clk_init_from_table(touch_clk_init_table);
+	rm31080ts_roth_data.platform_id = RM_PLATFORM_R005;
 	rm31080a_roth_spi_board[0].irq =
 		gpio_to_irq(TOUCH_GPIO_IRQ_RAYDIUM_SPI);
 	touch_init_raydium(TOUCH_GPIO_IRQ_RAYDIUM_SPI,
@@ -775,18 +684,6 @@ static int __init roth_touch_init(void)
 				&rm31080ts_roth_data,
 				&rm31080a_roth_spi_board[0],
 				ARRAY_SIZE(rm31080a_roth_spi_board));
-	return 0;
-}
-
-static int __init roth_revision_init(void)
-{
-	struct board_info board_info;
-	tegra_get_board_info(&board_info);
-	system_rev = 0;
-	if (board_info.board_id == BOARD_P2560)
-		system_rev = P2560;
-	else if (board_info.board_id == BOARD_P2454)
-		system_rev = P2454;
 	return 0;
 }
 
@@ -801,7 +698,6 @@ static void __init tegra_roth_init(void)
 	roth_spi_init();
 	roth_usb_init();
 	roth_uart_init();
-	roth_led_init();
 	roth_audio_init();
 	platform_add_devices(roth_devices, ARRAY_SIZE(roth_devices));
 	tegra_ram_console_debug_init();
@@ -812,8 +708,7 @@ static void __init tegra_roth_init(void)
 	roth_emc_init();
 	roth_edp_init();
 	roth_touch_init();
-	/* roth will pass a null board id to panel_init */
-	roth_panel_init(0);
+	roth_panel_init();
 	roth_kbc_init();
 	roth_pmon_init();
 #ifdef CONFIG_BT_BLUESLEEP
@@ -830,10 +725,6 @@ static void __init tegra_roth_init(void)
 	roth_sensors_init();
 	roth_soctherm_init();
 	roth_fan_init();
-	roth_revision_init();
-	roth_issp_init();
-	/* Enable HDMI hotplug as a wakesource */
-	tegra_set_wake_gpio(4, TEGRA_GPIO_HDMI_HPD);
 }
 
 static void __init roth_ramconsole_reserve(unsigned long size)

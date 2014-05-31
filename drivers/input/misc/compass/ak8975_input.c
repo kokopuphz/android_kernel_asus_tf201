@@ -1,1539 +1,670 @@
-/* Copyright (C) 2012 Invensense, Inc.
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+/*
+* Copyright (C) 2012 Invensense, Inc.
+*
+* This software is licensed under the terms of the GNU General Public
+* License version 2, as published by the Free Software Foundation, and
+* may be copied, distributed, and modified under those terms.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+*/
+
+/**
+ *  @addtogroup  DRIVERS
+ *  @brief	   Hardware drivers.
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
+ *  @{
+ *	  @file	ak8975_input.c
+ *	  @brief   A sysfs device driver for Invensense devices
+ *	  @details This driver currently works for the AK8975
  */
 
 #include <linux/i2c.h>
-#include <linux/input.h>
 #include <linux/module.h>
-#include <linux/miscdevice.h>
+#include <linux/moduleparam.h>
+#include <linux/kernel.h>
+#include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <linux/delay.h>
+#include <linux/input.h>
 #include <linux/workqueue.h>
-#include <linux/regulator/consumer.h>
+
 #include <linux/mpu.h>
 
+#define AK8975_DEBUG_IF	0
+#define AK8975_DEBUG_DATA	0
 
-#define AKM_VERSION			(23)
-#define AKM_NAME			"akm89xx"
-#define AKM_HW_DELAY_POR_MS		(50)
-#define AKM_HW_DELAY_TSM_MS		(10)	/* Time Single Measurement */
-#define AKM_HW_DELAY_US			(100)
-#define AKM_HW_DELAY_ROM_ACCESS_US	(200)
-#define AKM_POLL_DELAY_MS_DFLT		(200)
-#define AKM_MPU_RETRY_COUNT		(50)
-#define AKM_MPU_RETRY_DELAY_MS		(20)
-#define AKM_ERR_CNT_MAX			(20)
+#define AK8975_I2C_NAME "ak8975"
 
-#define AKM_INPUT_RESOLUTION		(1)
-#define AKM_INPUT_DIVISOR		(1)
-#define AKM_INPUT_DELAY_MS_MIN		(AKM_HW_DELAY_TSM_MS)
-#define AKM_INPUT_POWER_UA		(10000)
-#define AKM_INPUT_RANGE			(4912)
+#define SENSOR_DATA_SIZE	8
+#define YPR_DATA_SIZE		12
+#define RWBUF_SIZE		16
 
-#define AKM_REG_WIA			(0x00)
-#define AKM_WIA_ID			(0x48)
-#define AKM_REG_INFO			(0x01)
-#define AKM_REG_ST1			(0x02)
-#define AKM_ST1_DRDY			(0x01)
-#define AKM_ST1_DOR			(0x02)
-#define AKM_REG_HXL			(0x03)
-#define AKM_REG_HXH			(0x04)
-#define AKM_REG_HYL			(0x05)
-#define AKM_REG_HYH			(0x06)
-#define AKM_REG_HZL			(0x07)
-#define AKM_REG_HZH			(0x08)
-#define AKM_REG_ST2			(0x09)
-#define AKM_ST2_DERR			(0x04)
-#define AKM_ST2_HOFL			(0x08)
-#define AKM_ST2_BITM			(0x10)
-#define AKM_REG_CNTL1			(0x0A)
-#define AKM_CNTL1_MODE_MASK		(0x0F)
-#define AKM_CNTL1_MODE_POWERDOWN	(0x00)
-#define AKM_CNTL1_MODE_SINGLE		(0x01)
-#define AKM_CNTL1_MODE_CONT1		(0x02)
-#define AKM_CNTL1_MODE_CONT2		(0x06)
-#define AKM_CNTL1_MODE_SELFTEST		(0x08)
-#define AKM_CNTL1_MODE_ROM_ACCESS	(0x0F)
-#define AKM_CNTL1_OUTPUT_BIT16		(0x10)
-#define AKM_REG_CNTL2			(0x0B)
-#define AKM_CNTL2_SRST			(0x01)
-#define AKM_REG_ASTC			(0x0C)
-#define AKM_REG_ASTC_SELF		(0x40)
-#define AKM_REG_TS1			(0x0D)
-#define AKM_REG_TS2			(0x0E)
-#define AKM_REG_I2CDIS			(0x0F)
-#define AKM_REG_ASAX			(0x10)
-#define AKM_REG_ASAY			(0x11)
-#define AKM_REG_ASAZ			(0x12)
+#define ACC_DATA_FLAG		0
+#define MAG_DATA_FLAG		1
+#define ORI_DATA_FLAG		2
+#define AKM_NUM_SENSORS		3
 
-#define AKM8963_SCALE14			(19661)
-#define AKM8963_SCALE16			(4915)
-#define AKM8972_SCALE			(19661)
-#define AKM8975_SCALE			(9830)
-#define AKM8975_RANGE_X_LO		(-100)
-#define AKM8975_RANGE_X_HI		(100)
-#define AKM8975_RANGE_Y_LO		(-100)
-#define AKM8975_RANGE_Y_HI		(100)
-#define AKM8975_RANGE_Z_LO		(-1000)
-#define AKM8975_RANGE_Z_HI		(-300)
-#define AKM8972_RANGE_X_LO		(-50)
-#define AKM8972_RANGE_X_HI		(50)
-#define AKM8972_RANGE_Y_LO		(-50)
-#define AKM8972_RANGE_Y_HI		(50)
-#define AKM8972_RANGE_Z_LO		(-500)
-#define AKM8972_RANGE_Z_HI		(-100)
-#define AKM8963_RANGE14_X_LO		(-50)
-#define AKM8963_RANGE14_X_HI		(50)
-#define AKM8963_RANGE14_Y_LO		(-50)
-#define AKM8963_RANGE14_Y_HI		(50)
-#define AKM8963_RANGE14_Z_LO		(-800)
-#define AKM8963_RANGE14_Z_HI		(-200)
-#define AKM8963_RANGE16_X_LO		(-200)
-#define AKM8963_RANGE16_X_HI		(200)
-#define AKM8963_RANGE16_Y_LO		(-200)
-#define AKM8963_RANGE16_Y_HI		(200)
-#define AKM8963_RANGE16_Z_LO		(-3200)
-#define AKM8963_RANGE16_Z_HI		(-800)
+#define ACC_DATA_READY		(1 << (ACC_DATA_FLAG))
+#define MAG_DATA_READY		(1 << (MAG_DATA_FLAG))
+#define ORI_DATA_READY		(1 << (ORI_DATA_FLAG))
 
-#define AXIS_X				(0)
-#define AXIS_Y				(1)
-#define AXIS_Z				(2)
-#define WR				(0)
-#define RD				(1)
+/*! \name AK8975 constant definition
+ \anchor AK8975_Def
+ Constant definitions of the AK8975.*/
+#define AK8975_MEASUREMENT_TIME_US	10000
 
-#define AKM_DBG_SPEW_MSG		(1 << 0)
-#define AKM_DBG_SPEW_MAGNETIC_FIELD	(1 << 1)
-#define AKM_DBG_SPEW_MAGNETIC_FIELD_RAW	(1 << 2)
+/*! \name AK8975 operation mode
+ \anchor AK8975_Mode
+ Defines an operation mode of the AK8975.*/
+/*! @{*/
+#define AK8975_CNTL_MODE_SNG_MEASURE	0x01
+#define	AK8975_CNTL_MODE_SELF_TEST	0x08
+#define	AK8975_CNTL_MODE_FUSE_ACCESS	0x0F
+#define	AK8975_CNTL_MODE_POWER_DOWN	0x00
+/*! @}*/
 
-enum AKM_DATA_INFO {
-	AKM_DATA_INFO_DATA = 0,
-	AKM_DATA_INFO_VER,
-	AKM_DATA_INFO_RESET,
-	AKM_DATA_INFO_REGS,
-	AKM_DATA_INFO_DBG,
-	AKM_DATA_INFO_MAGNETIC_FIELD_SPEW,
-	AKM_DATA_INFO_MAGNETIC_FIELD_RAW_SPEW,
-	AKM_DATA_INFO_LIMIT_MAX,
-};
+/*! \name AK8975 register address
+\anchor AK8975_REG
+Defines a register address of the AK8975.*/
+/*! @{*/
+#define AK8975_REG_WIA		0x00
+#define AK8975_REG_INFO		0x01
+#define AK8975_REG_ST1		0x02
+#define AK8975_REG_HXL		0x03
+#define AK8975_REG_HXH		0x04
+#define AK8975_REG_HYL		0x05
+#define AK8975_REG_HYH		0x06
+#define AK8975_REG_HZL		0x07
+#define AK8975_REG_HZH		0x08
+#define AK8975_REG_ST2		0x09
+#define AK8975_REG_CNTL		0x0A
+#define AK8975_REG_RSV		0x0B
+#define AK8975_REG_ASTC		0x0C
+#define AK8975_REG_TS1		0x0D
+#define AK8975_REG_TS2		0x0E
+#define AK8975_REG_I2CDIS	0x0F
+/*! @}*/
 
-/* regulator names in order of powering on */
-static char *akm_vregs[] = {
-	"vdd",
-	"vid",
-};
+/*! \name AK8975 fuse-rom address
+\anchor AK8975_FUSE
+Defines a read-only address of the fuse ROM of the AK8975.*/
+/*! @{*/
+#define AK8975_FUSE_ASAX	0x10
+#define AK8975_FUSE_ASAY	0x11
+#define AK8975_FUSE_ASAZ	0x12
+/*! @}*/
 
-static char *akm_configs[] = {
-	"auto",
-	"mpu",
-	"host",
-};
+#define AK8975_MAX_DELAY	(100)
+#define AK8975_MIN_DELAY	(10)
 
-struct akm_asa {
-	u8 asa[3];			/* axis sensitivity adjustment */
-	s16 range_lo[3];
-	s16 range_hi[3];
-};
-
-struct akm_inf {
+/**
+ *  struct inv_gyro_state_s - Driver state variables.
+ *  @dev:		Represents read-only node for accessing buffered data.
+ *  @idev:		Handle to input device.
+ *  @sl_handle:		Handle to I2C port.
+ */
+struct inv_compass_state {
 	struct i2c_client *i2c;
-	struct mutex mutex_data;
+	atomic_t enable;
+	atomic_t delay;
+	struct mpu_platform_data plat_data;
+	short i2c_addr;
+	void *sl_handle;
+	struct device *inv_dev;
 	struct input_dev *idev;
-	struct workqueue_struct *wq;
-	struct delayed_work dw;
-	struct regulator_bulk_data vreg[ARRAY_SIZE(akm_vregs)];
-	struct mpu_platform_data pdata;
-	struct akm_asa asa;		/* data for calibration */
-	unsigned int poll_delay_us;	/* requested sampling delay (us) */
-	unsigned int range_i;		/* max_range index */
-	unsigned int resolution;	/* report when new data outside this */
-	unsigned int data_info;		/* data info to return */
-	unsigned int dbg;		/* device id */
-	unsigned int dev_id;		/* device id */
-	bool use_mpu;			/* if device behind MPU */
-	bool initd;			/* set if initialized */
-	bool enable;			/* enable status */
-	bool fifo_enable;		/* MPU FIFO enable */
-	bool port_en[2];		/* enable status of MPU write port */
-	int port_id[2];			/* MPU port ID */
-	u8 data_out;			/* write value to trigger a sample */
-	s16 xyz_raw[3];			/* raw sample data */
-	s16 xyz[3];			/* sample data after calibration */
+	struct delayed_work work;
+
+	struct mutex value_mutex;
+	struct mutex enable_mutex;
+	short value[3];
+	char asa[3];	/* axis sensitivity adjustment */
 };
 
-
-static int akm_i2c_rd(struct akm_inf *inf, u8 reg, u16 len, u8 *val)
+/* -------------------------------------------------------------------------- */
+/**
+ *  inv_serial_read() - Read one or more bytes from the device registers.
+ *  @st:	Device driver instance.
+ *  @reg:	First device register to be read from.
+ *  @length:	Number of bytes to read.
+ *  @data:	Data read from device.
+ *  NOTE: The slave register will not increment when reading from the FIFO.
+ */
+static int inv_serial_read(struct inv_compass_state *st,
+	unsigned char reg, unsigned short length, unsigned char *data)
 {
-	struct i2c_msg msg[2];
+	struct i2c_msg msgs[2];
+	int res;
 
-	msg[0].addr = inf->i2c->addr;
-	msg[0].flags = 0;
-	msg[0].len = 1;
-	msg[0].buf = &reg;
-	msg[1].addr = inf->i2c->addr;
-	msg[1].flags = I2C_M_RD;
-	msg[1].len = len;
-	msg[1].buf = val;
-	if (i2c_transfer(inf->i2c->adapter, msg, 2) != 2)
-		return -EIO;
+	if (!data || !st->sl_handle)
+		return -EINVAL;
 
-	return 0;
+	msgs[0].addr = st->i2c_addr;
+	msgs[0].flags = 0;	/* write */
+	msgs[0].buf = &reg;
+	msgs[0].len = 1;
+
+	msgs[1].addr = st->i2c_addr;
+	msgs[1].flags = I2C_M_RD;
+	msgs[1].buf = data;
+	msgs[1].len = length;
+
+	pr_debug("%s RD%02X%02X%02X\n",
+		 st->idev->name, st->i2c_addr, reg, length);
+	res = i2c_transfer(st->sl_handle, msgs, 2);
+	if (res < 2) {
+		if (res >= 0)
+			res = -EIO;
+		return res;
+	} else
+		return 0;
 }
 
-static int akm_i2c_wr(struct akm_inf *inf, u8 reg, u8 val)
+/**
+ *  inv_serial_single_write() - Write a byte to a device register.
+ *  @st:	Device driver instance.
+ *  @reg:	Device register to be written to.
+ *  @data:	Byte to write to device.
+ */
+static int inv_serial_single_write(struct inv_compass_state *st,
+	unsigned char reg, unsigned char data)
 {
+	unsigned char tmp[2];
 	struct i2c_msg msg;
-	u8 buf[2];
+	int res;
 
-	buf[0] = reg;
-	buf[1] = val;
-	msg.addr = inf->i2c->addr;
-	msg.flags = 0;
+	if (!st->sl_handle)
+		return -EINVAL;
+
+	tmp[0] = reg;
+	tmp[1] = data;
+
+	msg.addr = st->i2c_addr;
+	msg.flags = 0;	/* write */
+	msg.buf = tmp;
 	msg.len = 2;
-	msg.buf = buf;
-	if (i2c_transfer(inf->i2c->adapter, &msg, 1) != 1)
-		return -EIO;
 
-	return 0;
+	pr_debug("%s WS%02X%02X%02X\n",
+		 st->idev->name, st->i2c_addr, reg, data);
+	res = i2c_transfer(st->sl_handle, &msg, 1);
+	if (res < 1) {
+		if (res == 0)
+			res = -EIO;
+		return res;
+	} else
+		return 0;
 }
 
-static int akm_vreg_dis(struct akm_inf *inf, int i)
+static int ak8975_init(struct inv_compass_state *st)
 {
-	int err = 0;
+	int result = 0;
+	unsigned char serial_data[3];
 
-	if (inf->vreg[i].ret && (inf->vreg[i].consumer != NULL)) {
-		err = regulator_disable(inf->vreg[i].consumer);
-		if (err)
-			dev_err(&inf->i2c->dev, "%s %s ERR\n",
-				__func__, inf->vreg[i].supply);
-		else
-			dev_dbg(&inf->i2c->dev, "%s %s\n",
-				__func__, inf->vreg[i].supply);
+	result = inv_serial_single_write(st, AK8975_REG_CNTL,
+					 AK8975_CNTL_MODE_POWER_DOWN);
+	if (result) {
+		pr_err("%s, line=%d\n", __func__, __LINE__);
+		return result;
 	}
-	inf->vreg[i].ret = 0;
-	return err;
-}
+	/* Wait at least 100us */
+	udelay(100);
 
-static int akm_vreg_dis_all(struct akm_inf *inf)
-{
-	unsigned int i;
-	int err = 0;
-
-	for (i = ARRAY_SIZE(akm_vregs); i > 0; i--)
-		err |= akm_vreg_dis(inf, (i - 1));
-	return err;
-}
-
-static int akm_vreg_en(struct akm_inf *inf, int i)
-{
-	int err = 0;
-
-	if ((!inf->vreg[i].ret) && (inf->vreg[i].consumer != NULL)) {
-		err = regulator_enable(inf->vreg[i].consumer);
-		if (!err) {
-			inf->vreg[i].ret = 1;
-			dev_dbg(&inf->i2c->dev, "%s %s\n",
-				__func__, inf->vreg[i].supply);
-			err = 1; /* flag regulator state change */
-		} else {
-			dev_err(&inf->i2c->dev, "%s %s ERR\n",
-				__func__, inf->vreg[i].supply);
-		}
+	result = inv_serial_single_write(st, AK8975_REG_CNTL,
+					 AK8975_CNTL_MODE_FUSE_ACCESS);
+	if (result) {
+		pr_err("%s, line=%d\n", __func__, __LINE__);
+		return result;
 	}
-	return err;
-}
 
-static int akm_vreg_en_all(struct akm_inf *inf)
-{
-	int i;
-	int err = 0;
+	/* Wait at least 200us */
+	udelay(200);
 
-	for (i = 0; i < ARRAY_SIZE(akm_vregs); i++)
-		err |= akm_vreg_en(inf, i);
-	return err;
-}
-
-static void akm_vreg_exit(struct akm_inf *inf)
-{
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(akm_vregs); i++) {
-		if (inf->vreg[i].consumer != NULL) {
-			devm_regulator_put(inf->vreg[i].consumer);
-			inf->vreg[i].consumer = NULL;
-			dev_dbg(&inf->i2c->dev, "%s %s\n",
-				__func__, inf->vreg[i].supply);
-		}
+	result = inv_serial_read(st, AK8975_FUSE_ASAX, 3, serial_data);
+	if (result) {
+		pr_err("%s, line=%d\n", __func__, __LINE__);
+		return result;
 	}
-}
 
-static int akm_vreg_init(struct akm_inf *inf)
-{
-	unsigned int i;
-	int err = 0;
+	st->asa[0] = serial_data[0];
+	st->asa[1] = serial_data[1];
+	st->asa[2] = serial_data[2];
 
-	for (i = 0; i < ARRAY_SIZE(akm_vregs); i++) {
-		inf->vreg[i].supply = akm_vregs[i];
-		inf->vreg[i].ret = 0;
-		inf->vreg[i].consumer = devm_regulator_get(&inf->i2c->dev,
-							  inf->vreg[i].supply);
-		if (IS_ERR(inf->vreg[i].consumer)) {
-			err |= PTR_ERR(inf->vreg[i].consumer);
-			dev_err(&inf->i2c->dev, "%s err %d for %s\n",
-				__func__, err, inf->vreg[i].supply);
-			inf->vreg[i].consumer = NULL;
-		} else {
-			dev_dbg(&inf->i2c->dev, "%s %s\n",
-				__func__, inf->vreg[i].supply);
-		}
+	result = inv_serial_single_write(st, AK8975_REG_CNTL,
+					 AK8975_CNTL_MODE_POWER_DOWN);
+	if (result) {
+		pr_err("%s, line=%d\n", __func__, __LINE__);
+		return result;
 	}
-	return err;
+	udelay(100);
+
+	return result;
 }
 
-static int akm_pm(struct akm_inf *inf, bool enable)
+static int ak8975_read(struct inv_compass_state *st, short rawfixed[3])
 {
-	int err;
+	unsigned char regs[8];
+	unsigned char *stat = &regs[0];
+	unsigned char *stat2 = &regs[7];
+	int result = 0;
+	int status = 0;
 
-	if (enable) {
-		err = akm_vreg_en_all(inf);
-		if (err)
-			mdelay(AKM_HW_DELAY_POR_MS);
-	} else {
-		err = akm_vreg_dis_all(inf);
+	result = inv_serial_read(st, AK8975_REG_ST1, 8, regs);
+	if (result) {
+		pr_err("%s, line=%d\n", __func__, __LINE__);
+	return result;
 	}
-	if (err > 0)
-		err = 0;
-	if (err)
-		dev_err(&inf->i2c->dev, "%s pwr=%x ERR=%d\n",
-			__func__, enable, err);
-	else
-		dev_dbg(&inf->i2c->dev, "%s pwr=%x\n",
-			__func__, enable);
-	return err;
-}
 
-static int akm_port_free(struct akm_inf *inf, int port)
-{
-	int err = 0;
+	rawfixed[0] = (short)((regs[2]<<8) | regs[1]);
+	rawfixed[1] = (short)((regs[4]<<8) | regs[3]);
+	rawfixed[2] = (short)((regs[6]<<8) | regs[5]);
 
-	if ((inf->use_mpu) && (inf->port_id[port] >= 0)) {
-		err = nvi_mpu_port_free(inf->port_id[port]);
-		if (!err)
-			inf->port_id[port] = -1;
-	}
-	return err;
-}
-
-static int akm_ports_free(struct akm_inf *inf)
-{
-	int err;
-
-	err = akm_port_free(inf, WR);
-	err |= akm_port_free(inf, RD);
-	return err;
-}
-
-static void akm_pm_exit(struct akm_inf *inf)
-{
-	akm_ports_free(inf);
-	akm_pm(inf, false);
-	akm_vreg_exit(inf);
-}
-
-static int akm_pm_init(struct akm_inf *inf)
-{
-	int err;
-
-	inf->initd = false;
-	inf->enable = false;
-	inf->fifo_enable = false; /* DON'T ENABLE: MPU FIFO HW BROKEN */
-	inf->port_en[WR] = false;
-	inf->port_en[RD] = false;
-	inf->port_id[WR] = -1;
-	inf->port_id[RD] = -1;
-	inf->poll_delay_us = (AKM_POLL_DELAY_MS_DFLT * 1000);
-	akm_vreg_init(inf);
-	err = akm_pm(inf, true);
-	return err;
-}
-
-static int akm_nvi_mpu_bypass_request(struct akm_inf *inf)
-{
-	int i;
-	int err = 0;
-
-	if (inf->use_mpu) {
-		for (i = 0; i < AKM_MPU_RETRY_COUNT; i++) {
-			err = nvi_mpu_bypass_request(true);
-			if ((!err) || (err == -EPERM))
-				break;
-
-			msleep(AKM_MPU_RETRY_DELAY_MS);
-		}
-		if (err == -EPERM)
-			err = 0;
-	}
-	return err;
-}
-
-static int akm_nvi_mpu_bypass_release(struct akm_inf *inf)
-{
-	int err = 0;
-
-	if (inf->use_mpu)
-		err = nvi_mpu_bypass_release();
-	return err;
-}
-
-static int akm_wr(struct akm_inf *inf, u8 reg, u8 val)
-{
-	int err = 0;
-
-	err = akm_nvi_mpu_bypass_request(inf);
-	if (!err) {
-		err = akm_i2c_wr(inf, AKM_REG_CNTL1, AKM_CNTL1_MODE_POWERDOWN);
-		udelay(AKM_HW_DELAY_US);
-		err |= akm_i2c_wr(inf, reg, val);
-		akm_nvi_mpu_bypass_release(inf);
-	}
-	return err;
-}
-
-static int akm_port_enable(struct akm_inf *inf, int port, bool enable)
-{
-	int err = 0;
-
-	if (enable != inf->port_en[port]) {
-		err = nvi_mpu_enable(inf->port_id[port],
-				     enable, inf->fifo_enable);
-		if (!err)
-			inf->port_en[port] = enable;
-	}
-	return err;
-}
-
-static int akm_ports_enable(struct akm_inf *inf, bool enable)
-{
-	int err;
-
-	err = akm_port_enable(inf, RD, enable);
-	err |= akm_port_enable(inf, WR, enable);
-	return err;
-}
-
-static int akm_mode_wr(struct akm_inf *inf, bool reset,
-		       unsigned int range_i, u8 mode)
-{
-	u8 mode_old;
-	u8 mode_new;
-	u8 val;
-	int i;
-	int err = 0;
-
-	mode_new = mode;
-	if (range_i)
-		mode |= AKM_CNTL1_OUTPUT_BIT16;
-	if ((mode == inf->data_out) && (!reset))
-		return err;
-
-	mode_old = inf->data_out & AKM_CNTL1_MODE_MASK;
-	if (inf->use_mpu)
-		err = akm_ports_enable(inf, false);
-	else
-		cancel_delayed_work_sync(&inf->dw);
-	if (err)
-		return err;
-
-	if (reset) {
-		if (inf->dev_id == COMPASS_ID_AK8963) {
-			err = akm_nvi_mpu_bypass_request(inf);
-			if (!err) {
-				err = akm_wr(inf, AKM_REG_CNTL2,
-					     AKM_CNTL2_SRST);
-				for (i = 0; i < AKM_HW_DELAY_POR_MS; i++) {
-					mdelay(1);
-					err = akm_i2c_rd(inf, AKM_REG_CNTL2,
-							 1, &val);
-					if (err)
-						continue;
-
-					if (!(val & AKM_CNTL2_SRST))
-						break;
-				}
-				akm_nvi_mpu_bypass_release(inf);
-			}
-		}
-	}
-	inf->range_i = range_i;
-	inf->data_out = mode;
-	if (inf->use_mpu) {
-		if ((mode_old > AKM_CNTL1_MODE_SINGLE) ||
-					    (mode_new > AKM_CNTL1_MODE_SINGLE))
-			err = akm_wr(inf, AKM_REG_CNTL1, mode);
-		if (mode_new <= AKM_CNTL1_MODE_SINGLE) {
-			err |= nvi_mpu_data_out(inf->port_id[WR], mode);
-			if (mode_new)
-				err |= akm_ports_enable(inf, true);
-		} else {
-			err |= akm_port_enable(inf, RD, true);
-		}
-	} else {
-		err = akm_wr(inf, AKM_REG_CNTL1, mode);
-		if (mode_new)
-			queue_delayed_work(inf->wq, &inf->dw,
-					 usecs_to_jiffies(inf->poll_delay_us));
-	}
-	return err;
-}
-
-static int akm_delay(struct akm_inf *inf, unsigned int delay_us)
-{
-	u8 mode;
-	int err = 0;
-
-	if (inf->use_mpu)
-		err |= nvi_mpu_delay_us(inf->port_id[RD],
-					(unsigned int)delay_us);
-	if (!err) {
-		if (inf->dev_id == COMPASS_ID_AK8963) {
-			if (delay_us == (AKM_INPUT_DELAY_MS_MIN * 1000))
-				mode = AKM_CNTL1_MODE_CONT2;
-			else
-				mode = AKM_CNTL1_MODE_SINGLE;
-			err = akm_mode_wr(inf, false, inf->range_i, mode);
-		}
-	}
-	return err;
-}
-
-static void akm_calc(struct akm_inf *inf, u8 *data)
-{
-	s16 x;
-	s16 y;
-	s16 z;
-
-	/* data[1] = AKM_REG_HXL
-	 * data[2] = AKM_REG_HXH
-	 * data[3] = AKM_REG_HYL
-	 * data[4] = AKM_REG_HYH
-	 * data[5] = AKM_REG_HZL
-	 * data[6] = AKM_REG_HZH
+	/*
+	 * ST : data ready -
+	 * Measurement has been completed and data is ready to be read.
 	 */
-	mutex_lock(&inf->mutex_data);
-	x = (s16)le16_to_cpup((__le16 *)(&data[1]));
-	y = (s16)le16_to_cpup((__le16 *)(&data[3]));
-	z = (s16)le16_to_cpup((__le16 *)(&data[5]));
-	inf->xyz_raw[AXIS_X] = x;
-	inf->xyz_raw[AXIS_Y] = y;
-	inf->xyz_raw[AXIS_Z] = z;
-	x = (((int)x * (inf->asa.asa[AXIS_X] + 128)) >> 8);
-	y = (((int)y * (inf->asa.asa[AXIS_Y] + 128)) >> 8);
-	z = (((int)z * (inf->asa.asa[AXIS_Z] + 128)) >> 8);
-	inf->xyz[AXIS_X] = x;
-	inf->xyz[AXIS_Y] = y;
-	inf->xyz[AXIS_Z] = z;
-	mutex_unlock(&inf->mutex_data);
-}
+	if (*stat & 0x01)
+		status = 0;
 
-static s64 akm_timestamp_ns(void)
-{
-	struct timespec ts;
-	s64 ns;
-
-	ktime_get_ts(&ts);
-	ns = timespec_to_ns(&ts);
-	return ns;
-}
-
-static void akm_report(struct akm_inf *inf, u8 *data, s64 ts)
-{
-	akm_calc(inf, data);
-	mutex_lock(&inf->mutex_data);
-	if (inf->dbg & AKM_DBG_SPEW_MAGNETIC_FIELD_RAW)
-		dev_info(&inf->i2c->dev, "r %d %d %d %lld\n",
-			 inf->xyz_raw[AXIS_X], inf->xyz_raw[AXIS_Y],
-			 inf->xyz_raw[AXIS_Z], ts);
-	if (inf->dbg & AKM_DBG_SPEW_MAGNETIC_FIELD)
-		dev_info(&inf->i2c->dev, "%d %d %d %lld\n",
-			 inf->xyz[AXIS_X], inf->xyz[AXIS_Y],
-			 inf->xyz[AXIS_Z], ts);
-	input_report_rel(inf->idev, REL_X, inf->xyz[AXIS_X]);
-	input_report_rel(inf->idev, REL_Y, inf->xyz[AXIS_Y]);
-	input_report_rel(inf->idev, REL_Z, inf->xyz[AXIS_Z]);
-	mutex_unlock(&inf->mutex_data);
-	input_report_rel(inf->idev, REL_MISC, (unsigned int)(ts >> 32));
-	input_report_rel(inf->idev, REL_WHEEL,
-			 (unsigned int)(ts & 0xffffffff));
-	input_sync(inf->idev);
-}
-
-static int akm_read_sts(struct akm_inf *inf, u8 *data)
-{
-	int err = 0; /* assume still processing */
-	/* data[0] = AKM_REG_ST1
-	 * data[7] = AKM_REG_ST2
-	 * data[8] = AKM_REG_CNTL1
+	/*
+	 * ST2 : data error -
+	 * occurs when data read is started outside of a readable period;
+	 * data read would not be correct.
+	 * Valid in continuous measurement mode only.
+	 * In single measurement mode this error should not occour but we
+	 * stil account for it and return an error, since the data would be
+	 * corrupted.
+	 * DERR bit is self-clearing when ST2 register is read.
 	 */
-	if ((data[0] == AKM_ST1_DRDY) && (!(data[7] &
-					   (AKM_ST2_HOFL | AKM_ST2_DERR))))
-		err = 1; /* data ready to be reported */
-	else if (!(data[8] & AKM_CNTL1_MODE_MASK))
-		err = -1; /* something wrong */
-	return err;
-}
-
-static int akm_read(struct akm_inf *inf)
-{
-	long long timestamp1;
-	long long timestamp2;
-	u8 data[9];
-	int err;
-
-	timestamp1 = akm_timestamp_ns();
-	err = akm_i2c_rd(inf, AKM_REG_ST1, 9, data);
-	timestamp2 = akm_timestamp_ns();
-	if (err)
-		return err;
-
-	err = akm_read_sts(inf, data);
-	if (err > 0) {
-		timestamp2 = (timestamp2 - timestamp1) / 2;
-		timestamp1 += timestamp2;
-		akm_report(inf, data, timestamp1);
-		if ((inf->data_out & AKM_CNTL1_MODE_MASK) ==
-							 AKM_CNTL1_MODE_SINGLE)
-			akm_i2c_wr(inf, AKM_REG_CNTL1, inf->data_out);
-	} else if (err < 0) {
-			dev_err(&inf->i2c->dev, "%s ERR\n", __func__);
-			akm_mode_wr(inf, true, inf->range_i,
-				    inf->data_out & AKM_CNTL1_MODE_MASK);
+	if (*stat2 & 0x04)
+		status = 0x04;
+	/*
+	 * ST2 : overflow -
+	 * the sum of the absolute values of all axis |X|+|Y|+|Z| < 2400uT.
+	 * This is likely to happen in presence of an external magnetic
+	 * disturbance; it indicates, the sensor data is incorrect and should
+	 * be ignored.
+	 * An error is returned.
+	 * HOFL bit clears when a new measurement starts.
+	 */
+	if (*stat2 & 0x08)
+		status = 0x08;
+	/*
+	 * ST : overrun -
+	 * the previous sample was not fetched and lost.
+	 * Valid in continuous measurement mode only.
+	 * In single measurement mode this error should not occour and we
+	 * don't consider this condition an error.
+	 * DOR bit is self-clearing when ST2 or any meas. data register is
+	 * read.
+	 */
+	if (*stat & 0x02) {
+		/* status = INV_ERROR_COMPASS_DATA_UNDERFLOW; */
+		status = 0;
 	}
-	return err;
-}
 
-static void akm_mpu_handler(u8 *data, unsigned int len, s64 ts, void *p_val)
-{
-	struct akm_inf *inf;
-	int err;
-
-	inf = (struct akm_inf *)p_val;
-	if (inf->enable) {
-		err = akm_read_sts(inf, data);
-		if (err > 0)
-			akm_report(inf, data, ts);
-	}
-}
-
-static void akm_work(struct work_struct *ws)
-{
-	struct akm_inf *inf;
-
-	inf = container_of(ws, struct akm_inf, dw.work);
-	akm_read(inf);
-	queue_delayed_work(inf->wq, &inf->dw,
-			   usecs_to_jiffies(inf->poll_delay_us));
-}
-
-static void akm_range_limits(struct akm_inf *inf)
-{
-	if (inf->dev_id == COMPASS_ID_AK8963) {
-		if (inf->range_i) {
-			inf->asa.range_lo[AXIS_X] = AKM8963_RANGE16_X_LO;
-			inf->asa.range_hi[AXIS_X] = AKM8963_RANGE16_X_HI;
-			inf->asa.range_lo[AXIS_Y] = AKM8963_RANGE16_Y_LO;
-			inf->asa.range_hi[AXIS_Y] = AKM8963_RANGE16_Y_HI;
-			inf->asa.range_lo[AXIS_Z] = AKM8963_RANGE16_Z_LO;
-			inf->asa.range_hi[AXIS_Z] = AKM8963_RANGE16_Z_HI;
-		} else {
-			inf->asa.range_lo[AXIS_X] = AKM8963_RANGE14_X_LO;
-			inf->asa.range_hi[AXIS_X] = AKM8963_RANGE14_X_HI;
-			inf->asa.range_lo[AXIS_Y] = AKM8963_RANGE14_Y_LO;
-			inf->asa.range_hi[AXIS_Y] = AKM8963_RANGE14_Y_HI;
-			inf->asa.range_lo[AXIS_Z] = AKM8963_RANGE14_Z_LO;
-			inf->asa.range_hi[AXIS_Z] = AKM8963_RANGE14_Z_HI;
-		}
-	} else if (inf->dev_id == COMPASS_ID_AK8972) {
-		inf->asa.range_lo[AXIS_X] = AKM8972_RANGE_X_LO;
-		inf->asa.range_hi[AXIS_X] = AKM8972_RANGE_X_HI;
-		inf->asa.range_lo[AXIS_Y] = AKM8972_RANGE_Y_LO;
-		inf->asa.range_hi[AXIS_Y] = AKM8972_RANGE_Y_HI;
-		inf->asa.range_lo[AXIS_Z] = AKM8972_RANGE_Z_LO;
-		inf->asa.range_hi[AXIS_Z] = AKM8972_RANGE_Z_HI;
-	} else { /* default COMPASS_ID_AK8975 */
-		inf->dev_id = COMPASS_ID_AK8975;
-		inf->asa.range_lo[AXIS_X] = AKM8975_RANGE_X_LO;
-		inf->asa.range_hi[AXIS_X] = AKM8975_RANGE_X_HI;
-		inf->asa.range_lo[AXIS_Y] = AKM8975_RANGE_Y_LO;
-		inf->asa.range_hi[AXIS_Y] = AKM8975_RANGE_Y_HI;
-		inf->asa.range_lo[AXIS_Z] = AKM8975_RANGE_Z_LO;
-		inf->asa.range_hi[AXIS_Z] = AKM8975_RANGE_Z_HI;
-	}
-}
-
-static int akm_self_test(struct akm_inf *inf)
-{
-	u8 data[9];
-	u8 mode;
-	int i;
-	int err;
-	int err_t;
-
-	err_t = akm_i2c_wr(inf, AKM_REG_CNTL1, AKM_CNTL1_MODE_POWERDOWN);
-	udelay(AKM_HW_DELAY_US);
-	err_t |= akm_i2c_wr(inf, AKM_REG_ASTC, AKM_REG_ASTC_SELF);
-	udelay(AKM_HW_DELAY_US);
-	mode = AKM_CNTL1_MODE_SELFTEST;
-	if (inf->range_i)
-		mode |= AKM_CNTL1_OUTPUT_BIT16;
-	err_t |= akm_i2c_wr(inf, AKM_REG_CNTL1, mode);
-	for (i = 0; i < AKM_HW_DELAY_TSM_MS; i++) {
-		mdelay(AKM_HW_DELAY_TSM_MS);
-		err = akm_i2c_rd(inf, AKM_REG_ST1, 9, data);
-		if (!err) {
-			err = akm_read_sts(inf, data);
-			if (err > 0) {
-				akm_calc(inf, data);
-				err = 0;
-				break;
-			}
-			err = -EBUSY;
+	/*
+	 * trigger next measurement if:
+	 *	- stat is non zero;
+	 *	- if stat is zero and stat2 is non zero.
+	 * Won't trigger if data is not ready and there was no error.
+	 */
+	if (*stat != 0x00 || *stat2 != 0x00) {
+		result = inv_serial_single_write(st, AK8975_REG_CNTL,
+					 AK8975_CNTL_MODE_SNG_MEASURE);
+		if (result) {
+			pr_err("%s, line=%d\n", __func__, __LINE__);
+			return result;
 		}
 	}
-	err_t |= err;
-	akm_i2c_wr(inf, AKM_REG_ASTC, 0);
-	if (!err_t) {
-		akm_range_limits(inf);
-		if ((inf->xyz[AXIS_X] < inf->asa.range_lo[AXIS_X]) ||
-				(inf->xyz[AXIS_X] > inf->asa.range_hi[AXIS_X]))
-			err_t |= 1 << AXIS_X;
-		if ((inf->xyz[AXIS_Y] < inf->asa.range_lo[AXIS_Y]) ||
-				(inf->xyz[AXIS_Y] > inf->asa.range_hi[AXIS_Y]))
-			err_t |= 1 << AXIS_Y;
-		if ((inf->xyz[AXIS_Z] < inf->asa.range_lo[AXIS_Z]) ||
-				(inf->xyz[AXIS_Z] > inf->asa.range_hi[AXIS_Z]))
-			err_t |= 1 << AXIS_Z;
-		if (err_t) {
-			dev_err(&inf->i2c->dev, "%s ERR: out_of_range %x\n",
-				__func__, err_t);
 
-		}
-	}
-	return err_t;
+	if (status)
+		pr_err("%s, line=%d, status=%d\n", __func__, __LINE__, status);
+
+	return status;
 }
 
-static int akm_init_hw(struct akm_inf *inf)
+static void ak8975_work_func(struct work_struct *work)
 {
-	u8 val[8];
-	int err;
-	int err_t;
-
-	err_t = akm_nvi_mpu_bypass_request(inf);
-	if (!err_t) {
-		err_t = akm_wr(inf, AKM_REG_CNTL1, AKM_CNTL1_MODE_ROM_ACCESS);
-		udelay(AKM_HW_DELAY_ROM_ACCESS_US);
-		err_t |= akm_i2c_rd(inf, AKM_REG_ASAX, 3, inf->asa.asa);
-		/* we can autodetect AK8963 with BITM */
-		inf->dev_id = 0;
-		err = akm_wr(inf, AKM_REG_CNTL1, (AKM_CNTL1_MODE_SINGLE |
-						  AKM_CNTL1_OUTPUT_BIT16));
-		if (!err) {
-			mdelay(AKM_HW_DELAY_TSM_MS);
-			err = akm_i2c_rd(inf, AKM_REG_ST2, 1, val);
-			if ((!err) && (val[0] & AKM_CNTL1_OUTPUT_BIT16)) {
-				inf->dev_id = COMPASS_ID_AK8963;
-				inf->range_i = 1;
-			}
-		}
-		if (!inf->dev_id)
-			inf->dev_id = inf->pdata.sec_slave_id;
-		err = akm_self_test(inf);
-		if (err < 0)
-			err_t |= err;
-		akm_nvi_mpu_bypass_release(inf);
-	}
-	if (!err_t)
-		inf->initd = true;
-	else
-		dev_err(&inf->i2c->dev, "%s ERR %d\n", __func__, err_t);
-	return err_t;
-}
-
-static int akm_enable(struct akm_inf *inf, bool enable)
-{
-	int err = 0;
-
-	if (enable) {
-		akm_pm(inf, true);
-		if (!inf->initd)
-			err = akm_init_hw(inf);
-		if (!err) {
-			inf->data_out = AKM_CNTL1_MODE_SINGLE;
-			err |= akm_delay(inf, inf->poll_delay_us);
-			err |= akm_mode_wr(inf, true, inf->range_i,
-					  inf->data_out & AKM_CNTL1_MODE_MASK);
-			if (!err)
-				inf->enable = true;
-		}
-	} else if (inf->enable) {
-		err = akm_mode_wr(inf, false, inf->range_i,
-				  AKM_CNTL1_MODE_POWERDOWN);
-		if (!err) {
-			akm_pm(inf, false);
-			inf->enable = false;
-		}
-	}
-	return err;
-}
-
-static ssize_t akm_enable_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
-{
-	struct akm_inf *inf;
-	unsigned int enable;
-	bool en;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	err = kstrtouint(buf, 10, &enable);
-	if (err)
-		return -EINVAL;
-
-	if (enable)
-		en = true;
-	else
-		en = false;
-	if (inf->dbg & AKM_DBG_SPEW_MSG)
-		dev_info(&inf->i2c->dev, "%s: %x\n", __func__, en);
-	err = akm_enable(inf, en);
-	if (err) {
-		dev_err(&inf->i2c->dev, "%s: %x ERR=%d\n", __func__, en, err);
-		return err;
+	struct inv_compass_state *st =
+		container_of((struct delayed_work *)work,
+			struct inv_compass_state, work);
+	unsigned long delay = msecs_to_jiffies(atomic_read(&st->delay));
+	short c[3];
+	c[0] = c[1] = c[2] = 0;
+	if (0 == ak8975_read(st, c)) {
+		c[0] = ((c[0] * (st->asa[0] + 128)) >> 8);
+		c[1] = ((c[1] * (st->asa[1] + 128)) >> 8);
+		c[2] = ((c[2] * (st->asa[2] + 128)) >> 8);
+		input_report_rel(st->idev, REL_X, c[0]);
+		input_report_rel(st->idev, REL_Y, c[1]);
+		input_report_rel(st->idev, REL_Z, c[2]);
+		input_sync(st->idev);
 	}
 
-	return count;
+	mutex_lock(&st->value_mutex);
+	st->value[0] = c[0];
+	st->value[1] = c[1];
+	st->value[2] = c[2];
+	mutex_unlock(&st->value_mutex);
+	schedule_delayed_work(&st->work, delay);
 }
 
-static ssize_t akm_enable_show(struct device *dev,
-			       struct device_attribute *attr, char *buf)
+static ssize_t ak8975_value_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	struct akm_inf *inf;
-	unsigned int enable;
+	struct inv_compass_state *st = dev_get_drvdata(dev);
+	short c[3];
 
-	inf = dev_get_drvdata(dev);
-	if (inf->enable)
-		enable = 1;
-	else
-		enable = 0;
-	return sprintf(buf, "%u\n", enable);
+	mutex_lock(&st->value_mutex);
+	c[0] = st->value[0];
+	c[1] = st->value[1];
+	c[2] = st->value[2];
+	mutex_unlock(&st->value_mutex);
+	return sprintf(buf, "%d, %d, %d\n", c[0], c[1], c[2]);
 }
 
-static ssize_t akm_delay_store(struct device *dev,
-			       struct device_attribute *attr,
-			       const char *buf, size_t count)
+static ssize_t ak8975_scale_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	struct akm_inf *inf;
-	unsigned int delay_us;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	err = kstrtouint(buf, 10, &delay_us);
-	if (err)
-		return -EINVAL;
-
-	if (delay_us < (AKM_INPUT_DELAY_MS_MIN * 1000))
-		delay_us = (AKM_INPUT_DELAY_MS_MIN * 1000);
-	if ((inf->enable) && (delay_us != inf->poll_delay_us))
-		err = akm_delay(inf, delay_us);
-	if (!err) {
-		if (inf->dbg & AKM_DBG_SPEW_MSG)
-			dev_info(&inf->i2c->dev, "%s: %u\n",
-				 __func__, delay_us);
-		inf->poll_delay_us = delay_us;
-	} else {
-		dev_err(&inf->i2c->dev, "%s: %u ERR=%d\n",
-			__func__, delay_us, err);
-		return err;
-	}
-
-	return count;
+	return sprintf(buf, "%ld\n", 9830L * 32768L);
+}
+static ssize_t ak8975_reset_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct inv_compass_state *st = dev_get_drvdata(dev);
+	int result;
+	result = ak8975_init(st);
+	return sprintf(buf, "%d\n", result);
 }
 
-static ssize_t akm_delay_show(struct device *dev,
-			      struct device_attribute *attr, char *buf)
+static ssize_t ak8975_enable_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	struct akm_inf *inf;
-
-	inf = dev_get_drvdata(dev);
-	if (inf->enable)
-		return sprintf(buf, "%u\n", inf->poll_delay_us);
-
-	return sprintf(buf, "%u\n", (AKM_INPUT_DELAY_MS_MIN * 1000));
+	struct inv_compass_state *st = dev_get_drvdata(dev);
+	return sprintf(buf, "%d\n", atomic_read(&st->enable));
 }
 
-static ssize_t akm_resolution_store(struct device *dev,
-				    struct device_attribute *attr,
-				    const char *buf, size_t count)
+static ssize_t ak8975_rate_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	struct akm_inf *inf;
-	unsigned int resolution;
-
-	inf = dev_get_drvdata(dev);
-	if (kstrtouint(buf, 10, &resolution))
-		return -EINVAL;
-
-	dev_dbg(&inf->i2c->dev, "%s %u\n", __func__, resolution);
-	inf->resolution = resolution;
-	return count;
+	struct inv_compass_state *st = dev_get_drvdata(dev);
+	/* transform delay in ms to rate */
+	return sprintf(buf, "%d\n", 1000 / atomic_read(&st->delay));
 }
 
-static ssize_t akm_resolution_show(struct device *dev,
-				   struct device_attribute *attr, char *buf)
+static ssize_t akm8975_matrix_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
 {
-	struct akm_inf *inf;
-	unsigned int resolution;
-
-	inf = dev_get_drvdata(dev);
-	if (inf->enable)
-		resolution = inf->resolution;
-	else
-		resolution = AKM_INPUT_RESOLUTION;
-	return sprintf(buf, "%u\n", resolution);
-}
-
-static ssize_t akm_max_range_store(struct device *dev,
-				   struct device_attribute *attr,
-				   const char *buf, size_t count)
-{
-	struct akm_inf *inf;
-	unsigned int range_i;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	err = kstrtouint(buf, 10, &range_i);
-	if (err)
-		return -EINVAL;
-
-	dev_dbg(&inf->i2c->dev, "%s %u\n", __func__, range_i);
-	if (inf->dev_id == COMPASS_ID_AK8963) {
-		if (range_i > 1)
-			return -EINVAL;
-
-		if (inf->enable) {
-			err = akm_mode_wr(inf, false, range_i,
-					  inf->data_out & AKM_CNTL1_MODE_MASK);
-			if (err)
-				return err;
-		} else {
-			inf->range_i = range_i;
-		}
-	} else {
-		return -EINVAL;
-	}
-
-	return count;
-}
-
-static ssize_t akm_max_range_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
-{
-	struct akm_inf *inf;
-	unsigned int range;
-
-	inf = dev_get_drvdata(dev);
-	if (inf->enable) {
-		range = inf->range_i;
-	} else {
-		if (inf->dev_id == COMPASS_ID_AK8963) {
-			if (inf->range_i)
-				range = AKM8963_SCALE16;
-			else
-				range = AKM8963_SCALE14;
-		} else if (inf->dev_id == COMPASS_ID_AK8972) {
-			range = AKM8972_SCALE;
-		} else {
-			range = AKM8975_SCALE;
-		}
-	}
-	return sprintf(buf, "%u\n", range);
-}
-
-static ssize_t akm_data_store(struct device *dev,
-			      struct device_attribute *attr,
-			      const char *buf, size_t count)
-{
-	struct akm_inf *inf;
-	unsigned int data_info;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	err = kstrtouint(buf, 10, &data_info);
-	if (err)
-		return -EINVAL;
-
-	if (data_info >= AKM_DATA_INFO_LIMIT_MAX)
-		return -EINVAL;
-
-	dev_dbg(&inf->i2c->dev, "%s %u\n", __func__, data_info);
-	inf->data_info = data_info;
-	switch (data_info) {
-	case AKM_DATA_INFO_DATA:
-		inf->dbg = 0;
-		break;
-
-	case AKM_DATA_INFO_DBG:
-		inf->dbg ^= AKM_DBG_SPEW_MSG;
-		break;
-
-	case AKM_DATA_INFO_MAGNETIC_FIELD_SPEW:
-		inf->dbg ^= AKM_DBG_SPEW_MAGNETIC_FIELD;
-		break;
-
-	case AKM_DATA_INFO_MAGNETIC_FIELD_RAW_SPEW:
-		inf->dbg ^= AKM_DBG_SPEW_MAGNETIC_FIELD_RAW;
-		break;
-
-	default:
-		break;
-	}
-
-	return count;
-}
-
-static ssize_t akm_data_show(struct device *dev,
-			     struct device_attribute *attr,
-			     char *buf)
-{
-	struct akm_inf *inf;
-	ssize_t t;
-	u8 data[16];
-	enum AKM_DATA_INFO data_info;
-	bool enable;
-	unsigned int i;
-	int err = 0;
-
-	inf = dev_get_drvdata(dev);
-	data_info = inf->data_info;
-	inf->data_info = AKM_DATA_INFO_DATA;
-	enable = inf->enable;
-	switch (data_info) {
-	case AKM_DATA_INFO_DATA:
-		mutex_lock(&inf->mutex_data);
-		t = sprintf(buf, "magnetic_field: %hd, %hd, %hd   ",
-			    inf->xyz[AXIS_X],
-			    inf->xyz[AXIS_Y],
-			    inf->xyz[AXIS_Z]);
-		t += sprintf(buf + t, "raw: %hd, %hd, %hd\n",
-			     inf->xyz_raw[AXIS_X],
-			     inf->xyz_raw[AXIS_Y],
-			     inf->xyz_raw[AXIS_Z]);
-		mutex_unlock(&inf->mutex_data);
-		return t;
-
-	case AKM_DATA_INFO_VER:
-		return sprintf(buf, "version=%u\n", AKM_VERSION);
-
-	case AKM_DATA_INFO_RESET:
-		akm_pm(inf, true);
-		err = akm_mode_wr(inf, true, inf->range_i,
-				  inf->data_out & AKM_CNTL1_MODE_MASK);
-		akm_enable(inf, enable);
-		if (err)
-			return sprintf(buf, "reset ERR %d\n", err);
-		else
-			return sprintf(buf, "reset done\n");
-
-	case AKM_DATA_INFO_REGS:
-		if (!inf->initd)
-			t = sprintf(buf, "calibration: NEED ENABLE\n");
-		else
-			t = sprintf(buf, "calibration: x=%#2x y=%#2x z=%#2x\n",
-				    inf->asa.asa[AXIS_X],
-				    inf->asa.asa[AXIS_Y],
-				    inf->asa.asa[AXIS_Z]);
-		err = akm_nvi_mpu_bypass_request(inf);
-		if (!err) {
-			err = akm_i2c_rd(inf, AKM_REG_WIA, AKM_REG_ASAX, data);
-			akm_nvi_mpu_bypass_release(inf);
-		}
-		if (err) {
-			t += sprintf(buf + t, "registers: ERR %d\n", err);
-		} else {
-			t += sprintf(buf + t, "registers:\n");
-			for (i = 0; i < AKM_REG_ASAX; i++)
-				t += sprintf(buf + t, "%#2x=%#2x\n",
-					     AKM_REG_WIA + i, data[i]);
-		}
-		return t;
-
-	case AKM_DATA_INFO_DBG:
-		return sprintf(buf, "debug spew=%x\n",
-			       inf->dbg & AKM_DBG_SPEW_MSG);
-
-	case AKM_DATA_INFO_MAGNETIC_FIELD_SPEW:
-		return sprintf(buf, "xyz_ts spew=%x\n",
-			       !!(inf->dbg & AKM_DBG_SPEW_MAGNETIC_FIELD));
-
-	case AKM_DATA_INFO_MAGNETIC_FIELD_RAW_SPEW:
-		return sprintf(buf, "xyz_raw_ts spew=%x\n",
-			       !!(inf->dbg & AKM_DBG_SPEW_MAGNETIC_FIELD_RAW));
-
-	default:
-		break;
-	}
-
-	return -EINVAL;
-}
-
-static ssize_t akm_mpu_fifo_enable_store(struct device *dev,
-					 struct device_attribute *attr,
-					 const char *buf, size_t count)
-{
-	struct akm_inf *inf;
-	unsigned int fifo_enable;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	err = kstrtouint(buf, 10, &fifo_enable);
-	if (err)
-		return -EINVAL;
-
-	if (!inf->use_mpu)
-		return -EINVAL;
-
-	if (fifo_enable)
-		inf->fifo_enable = true;
-	else
-		inf->fifo_enable = false;
-	dev_dbg(&inf->i2c->dev, "%s %x\n", __func__, inf->fifo_enable);
-	return count;
-}
-
-static ssize_t akm_mpu_fifo_enable_show(struct device *dev,
-					struct device_attribute *attr,
-					char *buf)
-{
-	struct akm_inf *inf = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%x\n", inf->fifo_enable & inf->use_mpu);
-}
-
-static ssize_t akm_divisor_show(struct device *dev,
-				struct device_attribute *attr, char *buf)
-{
-	struct akm_inf *inf;
-
-	inf = dev_get_drvdata(dev);
-	return sprintf(buf, "%u\n", AKM_INPUT_DIVISOR);
-}
-
-static ssize_t akm_microamp_show(struct device *dev,
-				 struct device_attribute *attr, char *buf)
-{
-	struct akm_inf *inf;
-
-	inf = dev_get_drvdata(dev);
-	return sprintf(buf, "%u\n", AKM_INPUT_POWER_UA);
-}
-
-static ssize_t akm_self_test_show(struct device *dev,
-				  struct device_attribute *attr, char *buf)
-{
-	struct akm_inf *inf;
-	ssize_t t;
-	bool enable;
-	int err;
-
-	inf = dev_get_drvdata(dev);
-	enable = inf->enable;
-	akm_enable(inf, false);
-	akm_pm(inf, true);
-	if (!inf->initd) {
-		err = akm_init_hw(inf);
-	} else {
-		err = akm_nvi_mpu_bypass_request(inf);
-		if (!err) {
-			err = akm_self_test(inf);
-			akm_nvi_mpu_bypass_release(inf);
-		}
-	}
-	if (err < 0) {
-		t = sprintf(buf, "ERR: %d\n", err);
-	} else {
-		t = sprintf(buf, "%d   xyz: %hd %hd %hd   raw: %hd %hd %hd   ",
-			    err,
-			    inf->xyz[AXIS_X],
-			    inf->xyz[AXIS_Y],
-			    inf->xyz[AXIS_Z],
-			    inf->xyz_raw[AXIS_X],
-			    inf->xyz_raw[AXIS_Y],
-			    inf->xyz_raw[AXIS_Z]);
-		if (err > 0) {
-			if (err & (1 << AXIS_X))
-				t += sprintf(buf + t, "X ");
-			if (err & (1 << AXIS_Y))
-				t += sprintf(buf + t, "Y ");
-			if (err & (1 << AXIS_Z))
-				t += sprintf(buf + t, "Z ");
-			t += sprintf(buf + t, "FAILED\n");
-		} else {
-			t += sprintf(buf + t, "PASS\n");
-		}
-	}
-	akm_enable(inf, enable);
-	return t;
-}
-
-static ssize_t akm_orientation_show(struct device *dev,
-				    struct device_attribute *attr,
-				    char *buf)
-{
-	struct akm_inf *inf;
+	struct inv_compass_state *st = dev_get_drvdata(dev);
 	signed char *m;
-
-	inf = dev_get_drvdata(dev);
-	m = inf->pdata.orientation;
-	return sprintf(buf, "%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
-		       m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]);
+	m = st->plat_data.orientation;
+	return sprintf(buf,
+		"%d,%d,%d,%d,%d,%d,%d,%d,%d\n",
+		m[0],  m[1],  m[2],  m[3], m[4], m[5], m[6], m[7], m[8]);
 }
 
-static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_enable_show, akm_enable_store);
-static DEVICE_ATTR(delay, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_delay_show, akm_delay_store);
-static DEVICE_ATTR(resolution, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_resolution_show, akm_resolution_store);
-static DEVICE_ATTR(max_range, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_max_range_show, akm_max_range_store);
-static DEVICE_ATTR(data, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_data_show, akm_data_store);
-static DEVICE_ATTR(mpu_fifo_en, S_IRUGO | S_IWUSR | S_IWGRP,
-		   akm_mpu_fifo_enable_show, akm_mpu_fifo_enable_store);
-static DEVICE_ATTR(divisor, S_IRUGO,
-		   akm_divisor_show, NULL);
-static DEVICE_ATTR(microamp, S_IRUGO,
-		   akm_microamp_show, NULL);
-static DEVICE_ATTR(self_test, S_IRUGO,
-		   akm_self_test_show, NULL);
-static DEVICE_ATTR(orientation, S_IRUGO,
-		   akm_orientation_show, NULL);
+static ssize_t ak8975_rate_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned long data;
+	int error;
+	struct inv_compass_state *st = dev_get_drvdata(dev);
 
-static struct attribute *akm_attrs[] = {
+	error = kstrtoul(buf, 10, &data);
+	if (error)
+		return error;
+	/* transform rate to delay in ms */
+	data = 1000 / data;
+	if (data > AK8975_MAX_DELAY)
+		data = AK8975_MAX_DELAY;
+	if (data < AK8975_MIN_DELAY)
+		data = AK8975_MIN_DELAY;
+	atomic_set(&st->delay, (unsigned int) data);
+	return count;
+}
+
+static void ak8975_set_enable(struct device *dev, int enable)
+{
+	struct inv_compass_state *st = dev_get_drvdata(dev);
+	int result = 0;
+	int pre_enable = atomic_read(&st->enable);
+
+	mutex_lock(&st->enable_mutex);
+	if (enable) {
+		if (pre_enable == 0) {
+			result = inv_serial_single_write(st, AK8975_REG_CNTL,
+						AK8975_CNTL_MODE_SNG_MEASURE);
+			if (result)
+				pr_err("%s, line=%d\n", __func__, __LINE__);
+			schedule_delayed_work(&st->work,
+				msecs_to_jiffies(atomic_read(&st->delay)));
+			atomic_set(&st->enable, 1);
+		}
+
+	} else {
+		if (pre_enable == 1) {
+			cancel_delayed_work_sync(&st->work);
+			atomic_set(&st->enable, 0);
+			result = inv_serial_single_write(st, AK8975_REG_CNTL,
+						AK8975_CNTL_MODE_POWER_DOWN);
+			if (result)
+				pr_err("%s, line=%d\n", __func__, __LINE__);
+			mdelay(1);	/* wait at least 100us */
+		}
+	}
+	mutex_unlock(&st->enable_mutex);
+}
+
+static ssize_t ak8975_enable_store(struct device *dev,
+		struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+	unsigned long data;
+	int error;
+
+	error = kstrtoul(buf, 10, &data);
+	if (error)
+		return error;
+	if (data == 0 || data == 1)
+		ak8975_set_enable(dev, data);
+
+	return count;
+}
+
+static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR,
+		ak8975_enable_show, ak8975_enable_store);
+static DEVICE_ATTR(value, S_IRUGO, ak8975_value_show, NULL);
+static DEVICE_ATTR(scale, S_IRUGO, ak8975_scale_show, NULL);
+static DEVICE_ATTR(reset, S_IRUGO, ak8975_reset_show, NULL);
+static DEVICE_ATTR(rate, S_IRUGO | S_IWUSR, ak8975_rate_show,
+		ak8975_rate_store);
+static DEVICE_ATTR(compass_matrix, S_IRUGO, akm8975_matrix_show, NULL);
+
+static struct attribute *ak8975_attributes[] = {
 	&dev_attr_enable.attr,
-	&dev_attr_delay.attr,
-	&dev_attr_resolution.attr,
-	&dev_attr_max_range.attr,
-	&dev_attr_divisor.attr,
-	&dev_attr_microamp.attr,
-	&dev_attr_data.attr,
-	&dev_attr_self_test.attr,
-	&dev_attr_orientation.attr,
-	&dev_attr_mpu_fifo_en.attr,
+	&dev_attr_value.attr,
+	&dev_attr_scale.attr,
+	&dev_attr_reset.attr,
+	&dev_attr_rate.attr,
+	&dev_attr_compass_matrix.attr,
 	NULL
 };
 
-static struct attribute_group akm_attr_group = {
-	.name = AKM_NAME,
-	.attrs = akm_attrs
+static struct attribute_group ak8975_attribute_group = {
+	.name = "ak8975",
+	.attrs = ak8975_attributes
 };
 
-static int akm_sysfs_create(struct akm_inf *inf)
-{
-	int err;
 
-	err = sysfs_create_group(&inf->idev->dev.kobj, &akm_attr_group);
-	return err;
-}
-
-static void akm_input_close(struct input_dev *idev)
-{
-	struct akm_inf *inf;
-
-	inf = input_get_drvdata(idev);
-	if (inf != NULL)
-		akm_enable(inf, false);
-}
-
-static int akm_input_create(struct akm_inf *inf)
-{
-	int err;
-
-	inf->idev = input_allocate_device();
-	if (!inf->idev) {
-		err = -ENOMEM;
-		dev_err(&inf->i2c->dev, "%s ERR %d\n", __func__, err);
-		return err;
+/**
+ *  inv_setup_input() - internal setup input device.
+ *  @st:	Device driver instance.
+ *  @**idev_in  pointer to input device
+ *  @*client	i2c client
+ *  @*name	  name of the input device.
+ */
+static int inv_setup_input(struct inv_compass_state *st,
+	struct input_dev **idev_in, struct i2c_client *client,
+	unsigned char *name) {
+	int result;
+	struct input_dev *idev;
+	idev = input_allocate_device();
+	if (!idev) {
+		result = -ENOMEM;
+		return result;
 	}
+	/* Setup input device. */
+	idev->name = name;
 
-	inf->idev->name = AKM_NAME;
-	inf->idev->dev.parent = &inf->i2c->dev;
-	inf->idev->close = akm_input_close;
-	input_set_drvdata(inf->idev, inf);
-	input_set_capability(inf->idev, EV_REL, REL_X);
-	input_set_capability(inf->idev, EV_REL, REL_Y);
-	input_set_capability(inf->idev, EV_REL, REL_Z);
-	input_set_capability(inf->idev, EV_REL, REL_MISC);
-	input_set_capability(inf->idev, EV_REL, REL_WHEEL);
-	err = input_register_device(inf->idev);
-	if (err) {
-		input_free_device(inf->idev);
-		inf->idev = NULL;
-	}
-	return err;
+	idev->id.bustype = BUS_I2C;
+	idev->id.product = 'S';
+	idev->id.vendor	 = ('I'<<8) | 'S';
+	idev->id.version	= 1;
+	idev->dev.parent = &client->dev;
+	/* Open and close method. */
+	idev->open = NULL;
+	idev->close = NULL;
+
+	__set_bit(EV_REL, idev->evbit);
+	input_set_capability(idev, EV_REL, REL_X);
+	input_set_capability(idev, EV_REL, REL_Y);
+	input_set_capability(idev, EV_REL, REL_Z);
+
+	input_set_capability(idev, EV_REL, REL_MISC);
+	input_set_capability(idev, EV_REL, REL_WHEEL);
+
+	input_set_drvdata(idev, st);
+	result = input_register_device(idev);
+	if (result)
+		input_free_device(idev);
+
+	*idev_in = idev;
+	return result;
 }
+static unsigned short normal_i2c[] = { I2C_CLIENT_END };
 
-static int akm_id(struct akm_inf *inf)
-{
-	struct nvi_mpu_port nmp;
-	u8 config_boot;
-	u8 val = 0;
-	int err;
-
-	config_boot = inf->pdata.config & NVI_CONFIG_BOOT_MASK;
-	if (config_boot == NVI_CONFIG_BOOT_AUTO) {
-		nmp.addr = inf->i2c->addr | 0x80;
-		nmp.reg = AKM_REG_WIA;
-		nmp.ctrl = 1;
-		err = nvi_mpu_dev_valid(&nmp, &val);
-		/* see mpu.h for possible return values */
-		dev_dbg(&inf->i2c->dev, "%s AUTO ID=%x err=%d\n",
-			__func__, val, err);
-		if ((err == -EAGAIN) || (err == -EBUSY))
-			return -EAGAIN;
-
-		if (((!err) && (val == AKM_WIA_ID)) || (err == -EIO))
-			config_boot = NVI_CONFIG_BOOT_MPU;
-	}
-	if (config_boot == NVI_CONFIG_BOOT_MPU) {
-		inf->use_mpu = true;
-		nmp.addr = inf->i2c->addr | 0x80;
-		nmp.reg = AKM_REG_ST1;
-		nmp.ctrl = 10; /* MPU FIFO can't handle odd size */
-		nmp.data_out = 0;
-		nmp.delay_ms = 0;
-		nmp.delay_us = inf->poll_delay_us;
-		nmp.shutdown_bypass = false;
-		nmp.handler = &akm_mpu_handler;
-		nmp.ext_driver = (void *)inf;
-		err = nvi_mpu_port_alloc(&nmp);
-		dev_dbg(&inf->i2c->dev, "%s MPU port/err=%d\n",
-			__func__, err);
-		if (err < 0)
-			return err;
-
-		inf->port_id[RD] = err;
-		nmp.addr = inf->i2c->addr;
-		nmp.reg = AKM_REG_CNTL1;
-		nmp.ctrl = 1;
-		nmp.data_out = inf->data_out;
-		nmp.delay_ms = AKM_HW_DELAY_TSM_MS;
-		nmp.delay_us = 0;
-		nmp.shutdown_bypass = false;
-		nmp.handler = NULL;
-		nmp.ext_driver = NULL;
-		err = nvi_mpu_port_alloc(&nmp);
-		dev_dbg(&inf->i2c->dev, "%s MPU port/err=%d\n",
-			__func__, err);
-		if (err < 0) {
-			akm_ports_free(inf);
-		} else {
-			inf->port_id[WR] = err;
-			err = 0;
-		}
-		return err;
-	}
-
-	/* NVI_CONFIG_BOOT_HOST */
-	inf->use_mpu = false;
-	err = akm_i2c_rd(inf, AKM_REG_WIA, 1, &val);
-	dev_dbg(&inf->i2c->dev, "%s Host read ID=%x err=%d\n",
-		__func__, val, err);
-	if ((!err) && (val == AKM_WIA_ID))
-		return 0;
-
-	return -ENODEV;
-}
-
-static int akm_remove(struct i2c_client *client)
-{
-	struct akm_inf *inf;
-
-	inf = i2c_get_clientdata(client);
-	if (inf != NULL) {
-		if (inf->idev) {
-			input_unregister_device(inf->idev);
-			input_free_device(inf->idev);
-		}
-		if (inf->wq)
-			destroy_workqueue(inf->wq);
-		akm_pm_exit(inf);
-		if (&inf->mutex_data)
-			mutex_destroy(&inf->mutex_data);
-	}
-	dev_info(&client->dev, "%s\n", __func__);
-	return 0;
-}
-
-static void akm_shutdown(struct i2c_client *client)
-{
-	akm_remove(client);
-}
-
-static struct mpu_platform_data *akm_parse_dt(struct i2c_client *client)
+static int ak8975_mod_probe(struct i2c_client *client,
+			   const struct i2c_device_id *devid)
 {
 	struct mpu_platform_data *pdata;
-	struct device_node *np = client->dev.of_node;
-	char const *pchar;
-	u8 config;
-	int len;
+	struct inv_compass_state *st;
+	struct input_dev *idev;
+	int result = 0;
 
-	pdata = devm_kzalloc(&client->dev, sizeof(*pdata), GFP_KERNEL);
+	dev_info(&client->adapter->dev, "%s: %s\n", __func__, devid->name);
+
+	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
+		result = -ENODEV;
+		goto out_no_free;
+	}
+
+	pdata = (struct mpu_platform_data *)dev_get_platdata(&client->dev);
 	if (!pdata) {
-		dev_err(&client->dev, "Can't allocate platform data\n");
-		return ERR_PTR(-ENOMEM);
+		dev_err(&client->adapter->dev,
+			"Missing platform data for slave %s\n", devid->name);
+		result = -EFAULT;
+		goto out_no_free;
 	}
 
-	pchar = of_get_property(np, "orientation", &len);
-	if (!pchar || len != sizeof(pdata->orientation)) {
-		dev_err(&client->dev, "Cannot read orientation property\n");
-		return ERR_PTR(-EINVAL);
+	st = kzalloc(sizeof(*st), GFP_KERNEL);
+	if (!st) {
+		result = -ENOMEM;
+		goto out_no_free;
 	}
 
-	memcpy(pdata->orientation, pchar, len);
-	if (of_property_read_string(np, "config", &pchar)) {
-		dev_err(&client->dev, "Cannot read config property\n");
-		return ERR_PTR(-EINVAL);
-	}
+	i2c_set_clientdata(client, st);
+	st->i2c = client;
+	mutex_init(&st->value_mutex);
+	mutex_init(&st->enable_mutex);
+	atomic_set(&st->delay, 100);
+	st->sl_handle = client->adapter;
+	st->plat_data = *pdata;
+	st->i2c_addr = client->addr;
+	INIT_DELAYED_WORK(&st->work, ak8975_work_func);
+	result = inv_setup_input(st, &idev, client, "INV_AK8975");
+	if (result)
+		goto out_free_memory;
+	st->idev = idev;
+	result = sysfs_create_group(&st->idev->dev.kobj,
+						 &ak8975_attribute_group);
+	if (result < 0)
+		goto error_sysfs;
 
-	for (config = 0; config < ARRAY_SIZE(akm_configs); config++) {
-		if (!strcasecmp(pchar, akm_configs[config])) {
-			pdata->config = config;
-			break;
-		}
-	}
-	if (config == ARRAY_SIZE(akm_configs)) {
-		dev_err(&client->dev, "Invalid config value\n");
-		return ERR_PTR(-EINVAL);
-	}
+	result = ak8975_init(st);
+	if (result < 0)
+		goto error_sysfs;
 
-	return pdata;
+	return result;
+error_sysfs:
+	input_unregister_device(st->idev);
+out_free_memory:
+	kfree(st);
+out_no_free:
+	dev_err(&client->adapter->dev, "%s failed %d\n", __func__, result);
+	return result;
+
 }
 
-static int akm_probe(struct i2c_client *client,
-		     const struct i2c_device_id *devid)
+static int ak8975_mod_remove(struct i2c_client *client)
 {
-	struct akm_inf *inf;
-	struct mpu_platform_data *pd;
-	int err;
+	struct inv_compass_state *st =
+		i2c_get_clientdata(client);
 
-	dev_info(&client->dev, "%s\n", __func__);
-	inf = devm_kzalloc(&client->dev, sizeof(*inf), GFP_KERNEL);
-	if (!inf) {
-		dev_err(&client->dev, "%s kzalloc ERR\n", __func__);
-		return -ENOMEM;
-	}
-
-	inf->i2c = client;
-	i2c_set_clientdata(client, inf);
-	if (client->dev.of_node) {
-		pd = akm_parse_dt(client);
-		if (IS_ERR(pd))
-			return -EINVAL;
-	} else {
-		pd = (struct mpu_platform_data *)dev_get_platdata(&client->dev);
-		if (!pd)
-			return -EINVAL;
-	}
-
-	inf->pdata = *pd;
-	akm_pm_init(inf);
-	err = akm_id(inf);
-	akm_pm(inf, false);
-	if (err == -EAGAIN)
-		goto akm_probe_again;
-	else if (err)
-		goto akm_probe_err;
-
-	mutex_init(&inf->mutex_data);
-	err = akm_input_create(inf);
-	if (err)
-		goto akm_probe_err;
-
-	inf->wq = create_singlethread_workqueue(AKM_NAME);
-	if (!inf->wq) {
-		dev_err(&client->dev, "%s workqueue ERR\n", __func__);
-		err = -ENOMEM;
-		goto akm_probe_err;
-	}
-
-	INIT_DELAYED_WORK(&inf->dw, akm_work);
-	err = akm_sysfs_create(inf);
-	if (err)
-		goto akm_probe_err;
-
+	dev_dbg(&client->adapter->dev, "%s\n", __func__);
+	ak8975_set_enable(&st->idev->dev, 0);
+	sysfs_remove_group(&st->idev->dev.kobj, &ak8975_attribute_group);
+	input_unregister_device(st->idev);
+	kfree(st);
 	return 0;
-
-akm_probe_err:
-	dev_err(&client->dev, "%s ERR %d\n", __func__, err);
-akm_probe_again:
-	akm_remove(client);
-	return err;
 }
 
-static const struct i2c_device_id akm_i2c_device_id[] = {
-	{AKM_NAME, 0},
-	{"ak8963", 0},
-	{"ak8972", 0},
-	{"ak8975", 0},
+static const struct i2c_device_id ak8975_mod_id[] = {
+	{"ak8975", COMPASS_ID_AK8975},
 	{}
 };
 
-MODULE_DEVICE_TABLE(i2c, akm_i2c_device_id);
+MODULE_DEVICE_TABLE(i2c, ak8975_mod_id);
 
-static const struct of_device_id akm_of_match[] = {
-	{ .compatible = "ak,ak89xx", },
-	{ .compatible = "ak,ak8963", },
-	{ .compatible = "ak,ak8972", },
-	{ .compatible = "ak,ak8975", },
-	{ },
-};
-
-MODULE_DEVICE_TABLE(of, akm_of_match);
-
-static struct i2c_driver akm_driver = {
-	.class		= I2C_CLASS_HWMON,
-	.probe		= akm_probe,
-	.remove		= akm_remove,
+static struct i2c_driver ak8975_mod_driver = {
+	.class = I2C_CLASS_HWMON,
+	.probe = ak8975_mod_probe,
+	.remove = ak8975_mod_remove,
+	.id_table = ak8975_mod_id,
 	.driver = {
-		.name		= AKM_NAME,
-		.owner		= THIS_MODULE,
-		.of_match_table = of_match_ptr(akm_of_match),
-	},
-	.id_table	= akm_i2c_device_id,
-	.shutdown	= akm_shutdown,
+		   .owner = THIS_MODULE,
+		   .name = "ak8975_mod",
+		   },
+	.address_list = normal_i2c,
 };
 
-static int __init akm_init(void)
+static int __init ak8975_mod_init(void)
 {
-	return i2c_add_driver(&akm_driver);
+	int res = i2c_add_driver(&ak8975_mod_driver);
+	pr_info("%s: Probe name %s\n", __func__, "ak8975_mod");
+	if (res)
+		pr_err("%s failed\n", __func__);
+	return res;
 }
 
-static void __exit akm_exit(void)
+static void __exit ak8975_mod_exit(void)
 {
-	i2c_del_driver(&akm_driver);
+	pr_info("%s\n", __func__);
+	i2c_del_driver(&ak8975_mod_driver);
 }
 
-module_init(akm_init);
-module_exit(akm_exit);
+module_init(ak8975_mod_init);
+module_exit(ak8975_mod_exit);
 
+MODULE_AUTHOR("Invensense Corporation");
+MODULE_DESCRIPTION("Driver for AK8975 sensor with input subsystem");
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("AKM driver");
+MODULE_ALIAS("ak8975_mod");
 
+/**
+ *  @}
+ */

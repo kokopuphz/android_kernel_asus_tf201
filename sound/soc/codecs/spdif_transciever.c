@@ -39,11 +39,12 @@ static const struct snd_soc_dapm_widget spdif_dapm_widgets[] = {
 };
 
 static int spdif_write(struct snd_soc_codec * codec, unsigned int reg,
-							unsigned int val){
+							unsigned int val) {
 	return 0;
 }
 
-static int spdif_read(struct snd_soc_codec * codec, unsigned int reg){
+static unsigned int spdif_read(struct snd_soc_codec * codec,
+						unsigned int reg) {
 	return 0;
 }
 

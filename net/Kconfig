@@ -340,8 +340,15 @@ menuconfig WIRELESS
 
 if WIRELESS
 
+if MACH_ENDEAVORU
+source "net/wireless_enru/Kconfig"
+source "net/mac80211_enru/Kconfig"
+endif
+
+if !MACH_ENDEAVORU
 source "net/wireless/Kconfig"
 source "net/mac80211/Kconfig"
+endif
 
 endif # WIRELESS
 

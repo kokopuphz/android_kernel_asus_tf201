@@ -34,30 +34,12 @@
 #include <linux/clk.h>
 #include <linux/interrupt.h>
 #include <linux/wakelock.h>
-#include <linux/delay.h>
 #include <linux/pm_qos.h>
-#include <linux/timer.h>
 
 #define PROC_DIR	"bluetooth/sleep"
 
 /* 5 seconds of Min CPU configurations during resume */
 #define DEFAULT_RESUME_CPU_TIMEOUT	5000000
-
-#define TX_TIMER_INTERVAL 5
-
-/* Macro to enable or disable debug logging */
-/* #define BLUEDROID_PM_DBG */
-#ifndef BLUEDROID_PM_DBG
-#define BDP_DBG(fmt, ...)	pr_debug("%s: " fmt, __func__, ##__VA_ARGS__)
-#else
-#define BDP_DBG(fmt, ...)	pr_warn("%s: " fmt, __func__, ##__VA_ARGS__)
-#endif
-
-#define BDP_WARN(fmt, ...)	pr_warn("%s: " fmt, __func__, ##__VA_ARGS__)
-#define BDP_ERR(fmt, ...)	pr_err("%s: " fmt, __func__, ##__VA_ARGS__)
-
-/* status flags for bluedroid_pm_driver */
-#define BT_WAKE	0x01
 
 struct bluedroid_pm_data {
 	int gpio_reset;
@@ -66,7 +48,6 @@ struct bluedroid_pm_data {
 	int ext_wake;
 	int is_blocked;
 	int resume_min_frequency;
-	unsigned long flags;
 	unsigned host_wake_irq;
 	struct regulator *vdd_3v3;
 	struct regulator *vdd_1v8;
@@ -81,57 +62,10 @@ static bool bluedroid_pm_blocked = 1;
 static int create_bt_proc_interface(void *drv_data);
 static void remove_bt_proc_interface(void);
 
-static DEFINE_MUTEX(bt_wlan_sync);
-
-void bt_wlan_lock(void)
-{
-	mutex_lock(&bt_wlan_sync);
-}
-EXPORT_SYMBOL(bt_wlan_lock);
-
-void bt_wlan_unlock(void)
-{
-	mutex_unlock(&bt_wlan_sync);
-}
-EXPORT_SYMBOL(bt_wlan_unlock);
-
-/** bluedroid_m busy timer */
-static void bluedroid_pm_timer_expire(unsigned long data);
-static DEFINE_TIMER(bluedroid_pm_timer, bluedroid_pm_timer_expire, 0, 0);
-
 static irqreturn_t bluedroid_pm_hostwake_isr(int irq, void *dev_id)
 {
 	/* schedule a tasklet to handle the change in the host wake line */
 	return IRQ_HANDLED;
-}
-
-/**
- * Handles bluedroid_pm busy timer expiration.
- * @param data: bluedroid_pm strcuture.
- */
-static void bluedroid_pm_timer_expire(unsigned long data)
-{
-	struct bluedroid_pm_data *bluedroid_pm =
-				(struct bluedroid_pm_data *)data;
-
-	/*
-	 * if bluedroid_pm data is NULL or timer is deleted with TX busy.
-	 * return from the function.
-	 */
-	if (!bluedroid_pm || test_bit(BT_WAKE, &bluedroid_pm->flags))
-		return;
-
-	if (!gpio_get_value(bluedroid_pm->host_wake)) {
-		/* BT can sleep */
-		BDP_DBG("Tx and Rx are idle, BT sleeping");
-		gpio_set_value(bluedroid_pm->ext_wake, 0);
-		wake_unlock(&bluedroid_pm->wake_lock);
-	} else {
-		/* BT Rx is busy, Reset Timer */
-		BDP_DBG("Rx is busy, restarting the timer");
-		mod_timer(&bluedroid_pm_timer,
-					jiffies + (TX_TIMER_INTERVAL * HZ));
-	}
 }
 
 static int bluedroid_pm_rfkill_set_power(void *data, bool blocked)
@@ -143,9 +77,6 @@ static int bluedroid_pm_rfkill_set_power(void *data, bool blocked)
 	 */
 	if (gpio_get_value(bluedroid_pm->gpio_shutdown) == !blocked)
 		return 0;
-
-	bt_wlan_lock();
-	msleep(300);
 
 	if (blocked) {
 		if (bluedroid_pm->gpio_shutdown)
@@ -172,10 +103,6 @@ static int bluedroid_pm_rfkill_set_power(void *data, bool blocked)
 				PM_QOS_CPU_FREQ_MIN, PM_QOS_DEFAULT_VALUE);
 	}
 	bluedroid_pm->is_blocked = blocked;
-
-	msleep(50);
-	bt_wlan_unlock();
-
 	return 0;
 }
 
@@ -208,12 +135,12 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 
 	bluedroid_pm->vdd_3v3 = regulator_get(&pdev->dev, "vdd_bt_3v3");
 	if (IS_ERR_OR_NULL(bluedroid_pm->vdd_3v3)) {
-		BDP_WARN("regulator vdd_bt_3v3 not available\n");
+		pr_warn("%s: regulator vdd_bt_3v3 not available\n", __func__);
 		bluedroid_pm->vdd_3v3 = NULL;
 	}
 	bluedroid_pm->vdd_1v8 = regulator_get(&pdev->dev, "vddio_bt_1v8");
 	if (IS_ERR_OR_NULL(bluedroid_pm->vdd_1v8)) {
-		BDP_WARN("regulator vddio_bt_1v8 not available\n");
+		pr_warn("%s: regulator vddio_bt_1v8 not available\n", __func__);
 		bluedroid_pm->vdd_1v8 = NULL;
 	}
 
@@ -222,12 +149,12 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 		bluedroid_pm->gpio_reset = res->start;
 		ret = gpio_request(bluedroid_pm->gpio_reset, "reset_gpio");
 		if (ret) {
-			BDP_ERR("Failed to get reset gpio\n");
+			pr_err("%s: Failed to get reset gpio\n", __func__);
 			goto free_res;
 		}
 		gpio_direction_output(bluedroid_pm->gpio_reset, enable);
 	} else {
-		BDP_DBG("Reset gpio not registered.\n");
+		pr_debug("%s: Reset gpio not registered.\n", __func__);
 		bluedroid_pm->gpio_reset = 0;
 	}
 
@@ -238,12 +165,12 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 		ret = gpio_request(bluedroid_pm->gpio_shutdown,
 						"shutdown_gpio");
 		if (ret) {
-			BDP_ERR("Failed to get shutdown gpio\n");
+			pr_err("%s: Failed to get shutdown gpio\n", __func__);
 			goto free_res;
 		}
 		gpio_direction_output(bluedroid_pm->gpio_shutdown, enable);
 	} else {
-		BDP_DBG("shutdown gpio not registered\n");
+		pr_debug("%s: shutdown gpio not registered\n", __func__);
 		bluedroid_pm->gpio_shutdown = 0;
 	}
 
@@ -279,31 +206,31 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 		bluedroid_pm->host_wake = res->start;
 		ret = gpio_request(bluedroid_pm->host_wake, "bt_host_wake");
 		if (ret) {
-			BDP_ERR("Failed to get host_wake gpio\n");
+			pr_err("%s: Failed to get host_wake gpio\n", __func__);
 			goto free_res;
 		}
 		/* configure host_wake as input */
 		gpio_direction_input(bluedroid_pm->host_wake);
 	} else {
-		BDP_DBG("gpio_host_wake not registered\n");
+		pr_debug("%s: gpio_host_wake not registered\n", __func__);
 		bluedroid_pm->host_wake = 0;
 	}
 
 
 	res = platform_get_resource_byname(pdev, IORESOURCE_IRQ, "host_wake");
 	if (res) {
-		BDP_DBG("found host_wake irq\n");
+		pr_err("%s : found host_wake irq\n", __func__);
 		bluedroid_pm->host_wake_irq = res->start;
 		ret = request_irq(bluedroid_pm->host_wake_irq,
 					bluedroid_pm_hostwake_isr,
 					IRQF_DISABLED | IRQF_TRIGGER_RISING,
 					"bluetooth hostwake", bluedroid_pm);
 		if (ret) {
-			BDP_ERR("Failed to get host_wake irq\n");
+			pr_err("%s: Failed to get host_wake irq\n", __func__);
 			goto free_res;
 		}
 	} else {
-		BDP_DBG("host_wake not registered\n");
+		pr_debug("%s: host_wake not registered\n", __func__);
 		bluedroid_pm->host_wake_irq = 0;
 	}
 
@@ -313,24 +240,20 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 		bluedroid_pm->ext_wake = res->start;
 		ret = gpio_request(bluedroid_pm->ext_wake, "bt_ext_wake");
 		if (ret) {
-			BDP_ERR("Failed to get ext_wake gpio\n");
+			pr_err("%s: Failed to get ext_wake gpio\n", __func__);
 			goto free_res;
 		}
 		/* configure ext_wake as output mode*/
 		gpio_direction_output(bluedroid_pm->ext_wake, 1);
 		if (create_bt_proc_interface(bluedroid_pm)) {
-			BDP_ERR("Failed to create proc interface");
+			pr_err("%s: Failed to create proc interface", __func__);
 			goto free_res;
 		}
 		/* initialize wake lock */
 		wake_lock_init(&bluedroid_pm->wake_lock, WAKE_LOCK_SUSPEND,
 								"bluedroid_pm");
-		/* Initialize timer */
-		init_timer(&bluedroid_pm_timer);
-		bluedroid_pm_timer.function = bluedroid_pm_timer_expire;
-		bluedroid_pm_timer.data = bluedroid_pm;
 	} else {
-		BDP_DBG("gpio_ext_wake not registered\n");
+		pr_debug("%s: gpio_ext_wake not registered\n", __func__);
 		bluedroid_pm->ext_wake = 0;
 	}
 
@@ -340,7 +263,7 @@ static int bluedroid_pm_probe(struct platform_device *pdev)
 		bluedroid_pm->resume_min_frequency = res->start;
 
 	platform_set_drvdata(pdev, bluedroid_pm);
-	BDP_WARN("driver successfully registered");
+	pr_debug("RFKILL BT driver successfully registered");
 	return 0;
 
 free_res:
@@ -377,7 +300,6 @@ static int bluedroid_pm_remove(struct platform_device *pdev)
 		wake_lock_destroy(&bluedroid_pm->wake_lock);
 		gpio_free(bluedroid_pm->ext_wake);
 		remove_bt_proc_interface();
-		del_timer(&bluedroid_pm_timer);
 	}
 	if (bluedroid_pm->gpio_reset || bluedroid_pm->gpio_shutdown ||
 		bluedroid_pm->vdd_1v8 || bluedroid_pm->vdd_3v3) {
@@ -462,24 +384,11 @@ static int lpm_write_proc(struct file *file, const char *buffer,
 
 	if (!bluedroid_pm->is_blocked) {
 		if (buf[0] == '0') {
-			if (!gpio_get_value(bluedroid_pm->host_wake)) {
-				/* BT can sleep */
-				BDP_DBG("Tx and Rx are idle, BT sleeping");
-				gpio_set_value(bluedroid_pm->ext_wake, 0);
-				wake_unlock(&bluedroid_pm->wake_lock);
-			} else {
-				/* Reset Timer */
-				BDP_DBG("Rx is busy, restarting the timer");
-				mod_timer(&bluedroid_pm_timer,
-					jiffies + (TX_TIMER_INTERVAL * HZ));
-			}
-			clear_bit(BT_WAKE, &bluedroid_pm->flags);
+			gpio_set_value(bluedroid_pm->ext_wake, 0);
+			wake_unlock(&bluedroid_pm->wake_lock);
 		} else if (buf[0] == '1') {
-			BDP_DBG("Tx is busy, wake_lock taken, delete timer");
 			gpio_set_value(bluedroid_pm->ext_wake, 1);
 			wake_lock(&bluedroid_pm->wake_lock);
-			del_timer(&bluedroid_pm_timer);
-			set_bit(BT_WAKE, &bluedroid_pm->flags);
 		} else {
 			kfree(buf);
 			return -EINVAL;
@@ -504,20 +413,20 @@ static int create_bt_proc_interface(void *drv_data)
 
 	proc_bt_dir = proc_mkdir("bluetooth", NULL);
 	if (proc_bt_dir == NULL) {
-		BDP_ERR("Unable to create /proc/bluetooth directory");
+		pr_err("Unable to create /proc/bluetooth directory");
 		return -ENOMEM;
 	}
 
 	bluetooth_sleep_dir = proc_mkdir("sleep", proc_bt_dir);
 	if (proc_bt_dir == NULL) {
-		BDP_ERR("Unable to create /proc/bluetooth directory");
+		pr_err("Unable to create /proc/bluetooth directory");
 		return -ENOMEM;
 	}
 
 	/* Creating read/write "btwake" entry */
 	ent = create_proc_entry("lpm", 0622, bluetooth_sleep_dir);
 	if (ent == NULL) {
-		BDP_ERR("Unable to create /proc/%s/btwake entry", PROC_DIR);
+		pr_err("Unable to create /proc/%s/btwake entry", PROC_DIR);
 		retval = -ENOMEM;
 		goto fail;
 	}

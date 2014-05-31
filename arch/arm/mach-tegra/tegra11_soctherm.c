@@ -552,7 +552,7 @@ static inline void prog_hw_threshold(struct thermal_trip_info *trip_state,
 
 	trip_state->hysteresis = trip_state->hysteresis ?:
 		LOWER_PRECISION_FOR_CONV(1000);
-	trip_temp -= LOWER_PRECISION_FOR_TEMP(trip_state->hysteresis / 1000);
+	trip_temp -= (trip_state->hysteresis / 1000);
 
 	r = REG_SET(r, CTL_LVL0_CPU0_DN_THRESH, trip_temp);
 	r = REG_SET(r, CTL_LVL0_CPU0_EN, 1);
@@ -1459,9 +1459,9 @@ static int soctherm_init_platform_data(void)
 static int soctherm_suspend(void)
 {
 	soctherm_writel((u32)-1, INTR_DIS);
+	soctherm_clk_enable(false);
 	disable_irq(INT_THERMAL);
 	cancel_work_sync(&work);
-	soctherm_clk_enable(false);
 
 	return 0;
 }

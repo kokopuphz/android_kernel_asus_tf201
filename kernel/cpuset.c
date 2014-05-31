@@ -1362,41 +1362,6 @@ static int fmeter_getrate(struct fmeter *fmp)
 	return val;
 }
 
-/* Called by cgroups to determine if a cpuset is usable; cgroup_mutex held */
-static int cpuset_can_attach(struct cgroup_subsys *ss, struct cgroup *cont,
-			     struct task_struct *tsk)
-{
-	struct cpuset *cs = cgroup_cs(cont);
-
-	if ((current != task) && (!capable(CAP_SYS_ADMIN))) {
-		const struct cred *cred = current_cred(), *tcred;
-
-		if (cred->euid != tcred->uid && cred->euid != tcred->suid)
-			return -EPERM;
-	}
- 
-	if (cpumask_empty(cs->cpus_allowed) || nodes_empty(cs->mems_allowed))
-		return -ENOSPC;
-
-	/*
-	 * Kthreads bound to specific cpus cannot be moved to a new cpuset; we
-	 * cannot change their cpu affinity and isolating such threads by their
-	 * set of allowed nodes is unnecessary.  Thus, cpusets are not
-	 * applicable for such threads.  This prevents checking for success of
-	 * set_cpus_allowed_ptr() on all attached tasks before cpus_allowed may
-	 * be changed.
-	 */
-	if (tsk->flags & PF_THREAD_BOUND)
-		return -EINVAL;
-
-	return 0;
-}
-
-static int cpuset_can_attach_task(struct cgroup *cgrp, struct task_struct *task)
-{
-	return security_task_setscheduler(task);
-}
-
 /*
  * Protected by cgroup_lock. The nodemasks must be stored globally because
  * dynamically allocating them is not allowed in can_attach, and they must
@@ -2100,6 +2065,9 @@ static void scan_for_empty_cpusets(struct cpuset *root)
  * (of no affect) on systems that are actively using CPU hotplug
  * but making no active use of cpusets.
  *
+ * The only exception to this is suspend/resume, where we don't
+ * modify cpusets at all.
+ *
  * This routine ensures that top_cpuset.cpus_allowed tracks
  * cpu_active_mask on each CPU hotplug (cpuhp) event.
  *
@@ -2511,8 +2479,16 @@ void cpuset_print_task_mems_allowed(struct task_struct *tsk)
 
 	dentry = task_cs(tsk)->css.cgroup->dentry;
 	spin_lock(&cpuset_buffer_lock);
-	snprintf(cpuset_name, CPUSET_NAME_LEN,
-		 dentry ? (const char *)dentry->d_name.name : "/");
+
+	if (!dentry) {
+		strcpy(cpuset_name, "/");
+	} else {
+		spin_lock(&dentry->d_lock);
+		strlcpy(cpuset_name, (const char *)dentry->d_name.name,
+			CPUSET_NAME_LEN);
+		spin_unlock(&dentry->d_lock);
+	}
+
 	nodelist_scnprintf(cpuset_nodelist, CPUSET_NODELIST_LEN,
 			   tsk->mems_allowed);
 	printk(KERN_INFO "%s cpuset=%s mems_allowed=%s\n",
@@ -2623,3 +2599,4 @@ void cpuset_task_status_allowed(struct seq_file *m, struct task_struct *task)
 	seq_nodemask_list(m, &task->mems_allowed);
 	seq_printf(m, "\n");
 }
+

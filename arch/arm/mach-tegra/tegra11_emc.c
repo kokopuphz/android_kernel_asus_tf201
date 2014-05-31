@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/tegra11_emc.c
  *
- * Copyright (c) 2011-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2011-2012 NVIDIA Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -1179,16 +1179,7 @@ static struct platform_driver tegra11_emc_driver = {
 
 int __init tegra11_emc_init(void)
 {
-	int ret = platform_driver_register(&tegra11_emc_driver);
-	if (!ret) {
-		if (emc_enable) {
-			unsigned long rate = tegra_emc_round_rate_updown(
-				emc->boot_rate, false);
-			if (!IS_ERR_VALUE(rate))
-				tegra_clk_preset_emc_monitor(rate);
-		}
-	}
-	return ret;
+	return platform_driver_register(&tegra11_emc_driver);
 }
 
 void tegra_emc_timing_invalidate(void)

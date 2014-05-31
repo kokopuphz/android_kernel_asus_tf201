@@ -23,7 +23,6 @@
  */
 
 #include <linux/kernel.h>
-#include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
@@ -36,6 +35,8 @@
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
 #include <linux/watchdog.h>
+#include <linux/module.h>
+#include <../arch/arm/mach-tegra/eprj_enru/include/mach/board_htc.h>
 #ifdef CONFIG_TEGRA_FIQ_DEBUGGER
 #include <mach/irqs.h>
 #endif
@@ -197,6 +198,7 @@ static irqreturn_t tegra_wdt_interrupt(int irq, void *dev_id)
 {
 	unsigned i, status;
 
+	pr_info("touch watchdog\n");
 	for (i = 0; i < MAX_NR_CPU_WDT; i++) {
 		if (tegra_wdt[i] == NULL)
 			continue;
@@ -331,11 +333,11 @@ static const struct file_operations tegra_wdt_fops = {
 
 static int tegra_wdt_probe(struct platform_device *pdev)
 {
-	struct resource *res_src, *res_wdt, *res_irq;
-	struct resource	*res_int_base = NULL;
+	struct resource *res_src, *res_wdt, *res_irq, *res_int_base;
 	struct tegra_wdt *wdt;
 	u32 src;
 	int ret = 0;
+	u32 val = 0;
 
 	if (pdev->id < -1 && pdev->id > 3) {
 		dev_err(&pdev->dev, "only IDs 3:0 supported\n");
@@ -470,7 +472,6 @@ static int tegra_wdt_probe(struct platform_device *pdev)
 #ifdef CONFIG_TEGRA_WATCHDOG_ENABLE_ON_PROBE
 	/* Init and enable watchdog on WDT0 with timer 8 during probe */
 	if (!(pdev->id)) {
-		u32 val = 0;
 		wdt->status = WDT_ENABLED | WDT_ENABLED_AT_PROBE;
 		wdt->timeout = heartbeat;
 		tegra_wdt_enable(wdt);
@@ -573,12 +574,31 @@ static struct platform_driver tegra_wdt_driver = {
 
 static int __init tegra_wdt_init(void)
 {
+#ifdef CONFIG_MACH_ENDEAVORU
+	/*
+	 * Use kernel_flag KERNEL_FLAG_WATCHDOG_ENABLE bit
+	 * to decide to register tegra_wdt driver or not.
+	 * 0 : Enable tegra watchdog.
+	 * 1 : Disable tegra watchdog.
+	 */
+	if (get_kernel_flag() & KERNEL_FLAG_WATCHDOG_ENABLE) {
+		pr_info("Driver %s is not registered\n", tegra_wdt_driver.driver.name);
+		return 0;
+	} else {
+		pr_info("Driver %s is registered\n", tegra_wdt_driver.driver.name);
+		return platform_driver_register(&tegra_wdt_driver);
+	}
+#else
 	return platform_driver_register(&tegra_wdt_driver);
+#endif
 }
 
 static void __exit tegra_wdt_exit(void)
 {
-	platform_driver_unregister(&tegra_wdt_driver);
+#ifdef CONFIG_MACH_ENDEAVORU
+	if (!(get_kernel_flag() & KERNEL_FLAG_WATCHDOG_ENABLE))
+#endif
+		platform_driver_unregister(&tegra_wdt_driver);
 }
 
 module_init(tegra_wdt_init);

@@ -623,9 +623,11 @@ static ssize_t export_store(struct class *class,
 	 */
 
 	status = gpio_request(gpio, "sysfs");
-	if (status < 0)
+	if (status < 0) {
+		if (status == -EPROBE_DEFER)
+			status = -ENODEV;
 		goto done;
-
+	}
 	status = gpio_export(gpio, true);
 	if (status < 0)
 		gpio_free(gpio);
@@ -1081,6 +1083,10 @@ int gpiochip_add(struct gpio_chip *chip)
 		}
 	}
 
+#ifdef CONFIG_PINCTRL
+	INIT_LIST_HEAD(&chip->pin_ranges);
+#endif
+
 	of_gpiochip_add(chip);
 
 unlock:
@@ -1093,7 +1099,7 @@ unlock:
 	if (status)
 		goto fail;
 
-	pr_info("gpiochip_add: registered GPIOs %d to %d on device: %s\n",
+	pr_debug("gpiochip_add: registered GPIOs %d to %d on device: %s\n",
 		chip->base, chip->base + chip->ngpio - 1,
 		chip->label ? : "generic");
 
@@ -1121,6 +1127,7 @@ int gpiochip_remove(struct gpio_chip *chip)
 
 	spin_lock_irqsave(&gpio_lock, flags);
 
+	gpiochip_remove_pin_ranges(chip);
 	of_gpiochip_remove(chip);
 
 	for (id = chip->base; id < chip->base + chip->ngpio; id++) {
@@ -1154,9 +1161,9 @@ EXPORT_SYMBOL_GPL(gpiochip_remove);
  * non-zero, this function will return to the caller and not iterate over any
  * more gpio_chips.
  */
-struct gpio_chip *gpiochip_find(const void *data,
+struct gpio_chip *gpiochip_find(void *data,
 				int (*match)(struct gpio_chip *chip,
-					     const void *data))
+					     void *data))
 {
 	struct gpio_chip *chip = NULL;
 	unsigned long flags;
@@ -1178,6 +1185,73 @@ struct gpio_chip *gpiochip_find(const void *data,
 }
 EXPORT_SYMBOL_GPL(gpiochip_find);
 
+#ifdef CONFIG_PINCTRL
+
+/**
+ * gpiochip_add_pin_range() - add a range for GPIO <-> pin mapping
+ * @chip: the gpiochip to add the range for
+ * @pinctrl_name: the dev_name() of the pin controller to map to
+ * @offset: the start offset in the current gpio_chip number space
+ * @pin_base: the start offset in the pin controller number space
+ * @npins: the number of pins from the offset of each pin space (GPIO and
+ *	pin controller) to accumulate in this range
+ */
+int gpiochip_add_pin_range(struct gpio_chip *chip, const char *pinctl_name,
+			   unsigned int offset, unsigned int pin_base,
+			   unsigned int npins)
+{
+	struct gpio_pin_range *pin_range;
+
+	pin_range = kzalloc(sizeof(*pin_range), GFP_KERNEL);
+	if (!pin_range) {
+		pr_err("%s: GPIO chip: failed to allocate pin ranges\n",
+				chip->label);
+		return -ENOMEM;
+	}
+
+	/* Use local offset as range ID */
+	pin_range->range.id = offset;
+	pin_range->range.gc = chip;
+	pin_range->range.name = chip->label;
+	pin_range->range.base = chip->base + offset;
+	pin_range->range.pin_base = pin_base;
+	pin_range->range.npins = npins;
+	pin_range->pctldev = pinctrl_find_and_add_gpio_range(pinctl_name,
+			&pin_range->range);
+	if (!pin_range->pctldev) {
+		pr_err("%s: GPIO chip: could not create pin range\n",
+		       chip->label);
+		kfree(pin_range);
+	}
+	pr_debug("%s: GPIO chip: created GPIO range %d->%d ==> PIN %d->%d\n",
+		 chip->label, offset, offset + npins - 1,
+		 pin_base, pin_base + npins - 1);
+
+	list_add_tail(&pin_range->node, &chip->pin_ranges);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(gpiochip_add_pin_range);
+
+/**
+ * gpiochip_remove_pin_ranges() - remove all the GPIO <-> pin mappings
+ * @chip: the chip to remove all the mappings for
+ */
+void gpiochip_remove_pin_ranges(struct gpio_chip *chip)
+{
+	struct gpio_pin_range *pin_range, *tmp;
+
+	list_for_each_entry_safe(pin_range, tmp, &chip->pin_ranges, node) {
+		list_del(&pin_range->node);
+		pinctrl_remove_gpio_range(pin_range->pctldev,
+				&pin_range->range);
+		kfree(pin_range);
+	}
+}
+EXPORT_SYMBOL_GPL(gpiochip_remove_pin_ranges);
+
+#endif /* CONFIG_PINCTRL */
+
 /* These "optional" allocation calls help prevent drivers from stomping
  * on each other, and help provide better diagnostics in debugfs.
  * They're called even less than the "set direction" calls.
@@ -1186,13 +1260,15 @@ int gpio_request(unsigned gpio, const char *label)
 {
 	struct gpio_desc	*desc;
 	struct gpio_chip	*chip;
-	int			status = -EINVAL;
+	int			status = -EPROBE_DEFER;
 	unsigned long		flags;
 
 	spin_lock_irqsave(&gpio_lock, flags);
 
-	if (!gpio_is_valid(gpio))
+	if (!gpio_is_valid(gpio)) {
+		status = -EINVAL;
 		goto done;
+	}
 	desc = &gpio_desc[gpio];
 	chip = desc->chip;
 	if (chip == NULL)
@@ -1302,8 +1378,18 @@ int gpio_request_one(unsigned gpio, unsigned long flags, const char *label)
 				(flags & GPIOF_INIT_HIGH) ? 1 : 0);
 
 	if (err)
-		gpio_free(gpio);
+		goto free_gpio;
 
+	if (flags & GPIOF_EXPORT) {
+		err = gpio_export(gpio, flags & GPIOF_EXPORT_CHANGEABLE);
+		if (err)
+			goto free_gpio;
+	}
+
+	return 0;
+
+ free_gpio:
+	gpio_free(gpio);
 	return err;
 }
 EXPORT_SYMBOL_GPL(gpio_request_one);
@@ -1763,56 +1849,102 @@ static void gpiolib_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 	}
 }
 
-static int gpiolib_show(struct seq_file *s, void *unused)
+static void *gpiolib_seq_start(struct seq_file *s, loff_t *pos)
 {
-	struct gpio_chip	*chip = NULL;
-	unsigned		gpio;
-	int			started = 0;
+	struct gpio_chip *chip = NULL;
+	unsigned int gpio;
+	void *ret = NULL;
+	loff_t index = 0;
 
 	/* REVISIT this isn't locked against gpio_chip removal ... */
 
 	for (gpio = 0; gpio_is_valid(gpio); gpio++) {
-		struct device *dev;
-
-		if (chip == gpio_desc[gpio].chip)
+		if (gpio_desc[gpio].chip == chip)
 			continue;
+
 		chip = gpio_desc[gpio].chip;
 		if (!chip)
 			continue;
 
-		seq_printf(s, "%sGPIOs %d-%d",
-				started ? "\n" : "",
-				chip->base, chip->base + chip->ngpio - 1);
-		dev = chip->dev;
-		if (dev)
-			seq_printf(s, ", %s/%s",
-				dev->bus ? dev->bus->name : "no-bus",
-				dev_name(dev));
-		if (chip->label)
-			seq_printf(s, ", %s", chip->label);
-		if (chip->can_sleep)
-			seq_printf(s, ", can sleep");
-		seq_printf(s, ":\n");
-
-		started = 1;
-		if (chip->dbg_show)
-			chip->dbg_show(s, chip);
-		else
-			gpiolib_dbg_show(s, chip);
+		if (index++ >= *pos) {
+			ret = chip;
+			break;
+		}
 	}
+
+	s->private = "";
+
+	return ret;
+}
+
+static void *gpiolib_seq_next(struct seq_file *s, void *v, loff_t *pos)
+{
+	struct gpio_chip *chip = v;
+	unsigned int gpio;
+	void *ret = NULL;
+
+	/* skip GPIOs provided by the current chip */
+	for (gpio = chip->base + chip->ngpio; gpio_is_valid(gpio); gpio++) {
+		chip = gpio_desc[gpio].chip;
+		if (chip) {
+			ret = chip;
+			break;
+		}
+	}
+
+	s->private = "\n";
+	++*pos;
+
+	return ret;
+}
+
+static void gpiolib_seq_stop(struct seq_file *s, void *v)
+{
+}
+
+static int gpiolib_seq_show(struct seq_file *s, void *v)
+{
+	struct gpio_chip *chip = v;
+	struct device *dev;
+
+	seq_printf(s, "%sGPIOs %d-%d", (char *)s->private,
+			chip->base, chip->base + chip->ngpio - 1);
+	dev = chip->dev;
+	if (dev)
+		seq_printf(s, ", %s/%s", dev->bus ? dev->bus->name : "no-bus",
+			dev_name(dev));
+	if (chip->label)
+		seq_printf(s, ", %s", chip->label);
+	if (chip->can_sleep)
+		seq_printf(s, ", can sleep");
+	seq_printf(s, ":\n");
+
+	if (chip->dbg_show)
+		chip->dbg_show(s, chip);
+	else
+		gpiolib_dbg_show(s, chip);
+
 	return 0;
 }
 
+static const struct seq_operations gpiolib_seq_ops = {
+	.start = gpiolib_seq_start,
+	.next = gpiolib_seq_next,
+	.stop = gpiolib_seq_stop,
+	.show = gpiolib_seq_show,
+};
+
 static int gpiolib_open(struct inode *inode, struct file *file)
 {
-	return single_open(file, gpiolib_show, NULL);
+	return seq_open(file, &gpiolib_seq_ops);
 }
 
 static const struct file_operations gpiolib_operations = {
+	.owner		= THIS_MODULE,
 	.open		= gpiolib_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
-	.release	= single_release,
+	.release	= seq_release,
 };
 
 static int __init gpiolib_debugfs_init(void)

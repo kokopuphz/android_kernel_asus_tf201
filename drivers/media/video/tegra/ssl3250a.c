@@ -91,10 +91,9 @@
 #include <linux/list.h>
 #include <linux/regulator/consumer.h>
 #include <linux/gpio.h>
-#include <linux/module.h>
-
 #include <media/nvc.h>
 #include <media/ssl3250a.h>
+#include <linux/module.h>
 
 #define SSL3250A_REG_AMP	0x00
 #define SSL3250A_REG_TMR	0x01

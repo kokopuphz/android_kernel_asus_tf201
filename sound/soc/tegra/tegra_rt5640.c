@@ -2,7 +2,7 @@
  * tegra_rt5640.c - Tegra machine ASoC driver for boards using ALC5640 codec.
  *
  * Author: Johnny Qiu <joqiu@nvidia.com>
- * Copyright (C) 2011-2013, NVIDIA, Inc.
+ * Copyright (C) 2011-2012, NVIDIA, Inc.
  *
  * Based on code copyright/by:
  *
@@ -10,7 +10,7 @@
  * Author: Graeme Gregory
  *         graeme.gregory@wolfsonmicro.com or linux@wolfsonmicro.com
  *
- * Copyright (c) 2012-2013, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2012, NVIDIA CORPORATION. All rights reserved.
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
  * version 2 as published by the Free Software Foundation.
@@ -80,8 +80,6 @@ struct tegra_rt5640 {
 #endif
 	enum snd_soc_bias_level bias_level;
 	volatile int clock_enabled;
-	int speaker_sel;
-	int tfa9887_on;
 };
 
 void tegra_asoc_enable_clocks(void);
@@ -100,8 +98,7 @@ static int tegra_rt5640_hw_params(struct snd_pcm_substream *substream,
 	struct tegra30_i2s *i2s = snd_soc_dai_get_drvdata(cpu_dai);
 	int srate, mclk, i2s_daifmt;
 	int err, rate;
-	static unsigned int initTfa;
-	static int tfasrate;
+	static unsigned initTfa = 0;
 
 	srate = params_rate(params);
 	mclk = 256 * srate;
@@ -162,19 +159,13 @@ static int tegra_rt5640_hw_params(struct snd_pcm_substream *substream,
 		dev_err(card->dev, "codec_dai clock not set\n");
 		return err;
 	}
-	if (machine_is_roth()) {
-		if (initTfa == 1) {
+	if(machine_is_roth()) {
+		if(initTfa == 1) {
 			i2s_tfa = i2s;
 			tegra_asoc_enable_clocks();
 			pr_info("INIT TFA\n");
 			Tfa9887_Init(srate);
-			tfasrate = srate;
 			tegra_asoc_disable_clocks();
-		} else if (initTfa > 1) {
-			if (srate != tfasrate) {
-				Tfa9887_setSampleRate(srate);
-				tfasrate = srate;
-			}
 		}
 		initTfa++;
 	}
@@ -444,27 +435,20 @@ static int tegra_rt5640_event_int_spk(struct snd_soc_dapm_widget *w,
 			regulator_disable(machine->spk_reg);
 		}
 	}
-
-	if (machine_is_roth()) {
-		if (i2s_tfa) {
-			if (SND_SOC_DAPM_EVENT_ON(event)) {
-			    machine->speaker_sel = 1;
-				if (!machine->tfa9887_on) {
-					if (codec_rt)
-						snd_soc_update_bits(codec_rt,
-							RT5640_PWR_DIG1, 0x0001, 0x0000);
-					tegra_asoc_enable_clocks();
-					Tfa9887_Powerdown(0);
-					tegra_asoc_disable_clocks();
-					machine->tfa9887_on = 1;
-				}
-			} else {
-				Tfa9887_Powerdown(1);
-				machine->tfa9887_on = 0;
+	if(machine_is_roth()) {
+		if (SND_SOC_DAPM_EVENT_ON(event)) {
+			if(i2s_tfa) {
+				if (codec_rt)
+					snd_soc_update_bits(codec_rt, RT5640_PWR_DIG1, 0x0001, 0x0000);
+				tegra_asoc_enable_clocks();
+				Tfa9887_Powerdown(0);
+				tegra_asoc_disable_clocks();
 			}
 		}
+		else {
+				Tfa9887_Powerdown(1);
+		}
 	}
-
 	if (!(machine->gpio_requested & GPIO_SPKR_EN))
 		return 0;
 
@@ -481,16 +465,6 @@ static int tegra_rt5640_event_hp(struct snd_soc_dapm_widget *w,
 	struct snd_soc_card *card = dapm->card;
 	struct tegra_rt5640 *machine = snd_soc_card_get_drvdata(card);
 	struct tegra_asoc_platform_data *pdata = machine->pdata;
-
-	machine->speaker_sel = 0;
-	if (machine_is_roth()) {
-		if (i2s_tfa) {
-			if (SND_SOC_DAPM_EVENT_ON(event)) {
-				Tfa9887_Powerdown(1);
-				machine->tfa9887_on = 0;
-			}
-		}
-	}
 
 	if (!(machine->gpio_requested & GPIO_HP_MUTE))
 		return 0;
@@ -557,6 +531,9 @@ static const struct snd_soc_dapm_route cardhu_audio_map[] = {
 	{"Int Spk", NULL, "SPOLP"},
 	{"Int Spk", NULL, "SPOLN"},
 	{"micbias1", NULL, "Mic Jack"},
+	{"IN1P", NULL, "micbias1"},
+	{"IN1N", NULL, "micbias1"},
+	{"micbias1", NULL, "Int Mic"},
 	{"IN2P", NULL, "micbias1"},
 	{"DMIC L1", NULL, "Int Mic"},
 	{"DMIC L2", NULL, "Int Mic"},
@@ -570,35 +547,6 @@ static const struct snd_kcontrol_new cardhu_controls[] = {
 	SOC_DAPM_PIN_SWITCH("Mic Jack"),
 	SOC_DAPM_PIN_SWITCH("Int Mic"),
 };
-
-static int tegra_set_tfa9887_powerdown(struct snd_kcontrol *kcontrol,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	struct  tegra_asoc_utils_data *data = snd_kcontrol_chip(kcontrol);
-	struct snd_soc_card *card = data->card;
-	struct tegra_rt5640 *machine = snd_soc_card_get_drvdata(card);
-
-	data->tfa9887_powerdown = ucontrol->value.integer.value[0];
-	if (i2s_tfa && (i2s_tfa->playback_ref_count <= 1)) {
-		Tfa9887_Powerdown(data->tfa9887_powerdown);
-		machine->tfa9887_on = !data->tfa9887_powerdown;
-	}
-	return 1;
-}
-
-static int tegra_get_tfa9887_powerdown(struct snd_kcontrol *kcontrol,
-			      struct snd_ctl_elem_value *ucontrol)
-{
-	struct  tegra_asoc_utils_data *data = snd_kcontrol_chip(kcontrol);
-	ucontrol->value.integer.value[0] = data->tfa9887_powerdown;
-
-	return 0;
-}
-
-struct snd_kcontrol_new tegra_tfa9887_controls =
-	SOC_SINGLE_EXT("tfa9887 powerdown", 0, 0, 1, \
-	0, tegra_get_tfa9887_powerdown, tegra_set_tfa9887_powerdown);
-
 
 static int tegra_rt5640_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -679,15 +627,6 @@ static int tegra_rt5640_init(struct snd_soc_pcm_runtime *rtd)
 	if (ret < 0)
 		return ret;
 
-	if (machine_is_roth()) {
-		ret = snd_ctl_add(machine->util_data.card->snd_card,
-			snd_ctl_new1(&tegra_tfa9887_controls, &machine->util_data));
-		if (ret < 0) {
-			dev_err(card->dev, "Can't add tfa9887 alsa control");
-			return ret;
-		}
-	}
-
 	/* FIXME: Calculate automatically based on DAPM routes? */
 	snd_soc_dapm_nc_pin(dapm, "LOUTL");
 	snd_soc_dapm_nc_pin(dapm, "LOUTR");
@@ -754,26 +693,6 @@ static int tegra_rt5640_set_bias_level(struct snd_soc_card *card,
 		machine->bias_level = level;
 	}
 
-    if (machine_is_roth()) {
-	    if (machine->speaker_sel &&
-		    !machine->tfa9887_on &&
-		    level > machine->bias_level) {
-		    if (i2s_tfa) {
-			    if (codec_rt)
-				    snd_soc_update_bits(codec_rt, RT5640_PWR_DIG1, 0x0001, 0x0000);
-			    tegra_asoc_enable_clocks();
-			    Tfa9887_Powerdown(0);
-			    tegra_asoc_disable_clocks();
-			    machine->tfa9887_on = 1;
-		    }
-	    }
-		if (level == SND_SOC_BIAS_OFF) {
-			if (i2s_tfa) {
-				Tfa9887_Powerdown(1);
-				machine->tfa9887_on = 0;
-			}
-		}
-	}
 	return 0;
 }
 
@@ -781,7 +700,7 @@ static int tegra_rt5640_set_bias_level_post(struct snd_soc_card *card,
 	struct snd_soc_dapm_context *dapm, enum snd_soc_bias_level level)
 {
 	struct tegra_rt5640 *machine = snd_soc_card_get_drvdata(card);
-	//printk("tegra_rt5640_set_bias_level_post level =%d\n",level);
+
 	if (machine->bias_level != SND_SOC_BIAS_OFF &&
 		level == SND_SOC_BIAS_OFF && machine->clock_enabled) {
 		machine->clock_enabled = 0;

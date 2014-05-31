@@ -395,8 +395,13 @@ int snd_soc_dapm_get_pin_status(struct snd_soc_dapm_context *dapm,
 int snd_soc_dapm_sync(struct snd_soc_dapm_context *dapm);
 int snd_soc_dapm_force_enable_pin(struct snd_soc_dapm_context *dapm,
 				  const char *pin);
+#ifdef CONFIG_MACH_X3
+int snd_soc_dapm_ignore_suspend(struct snd_soc_dapm_context *dapm,
+				const char *pin, int ignore);
+#else
 int snd_soc_dapm_ignore_suspend(struct snd_soc_dapm_context *dapm,
 				const char *pin);
+#endif
 void snd_soc_dapm_auto_nc_codec_pins(struct snd_soc_codec *codec);
 
 /* Mostly internal - should not normally be used */

@@ -3,7 +3,7 @@
  *
  * Tegra Graphics Host Command DMA
  *
- * Copyright (c) 2010-2013, NVIDIA Corporation.
+ * Copyright (c) 2010-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -47,16 +47,10 @@ struct mem_handle;
  *	update - call to update sync queue and push buffer, unpin memory
  */
 
-struct mem_mgr_handle {
-	struct mem_mgr *client;
-	struct mem_handle *handle;
-};
-
 struct push_buffer {
 	struct mem_handle *mem;		/* handle to pushbuffer memory */
 	u32 *mapped;			/* mapped pushbuffer memory */
-	struct sg_table *sgt;
-	dma_addr_t phys;		/* physical address of pushbuffer */
+	u32 phys;			/* physical address of pushbuffer */
 	u32 fence;			/* index we've written */
 	u32 cur;			/* index to write to */
 	struct mem_mgr_handle *client_handle; /* handle for each opcode pair */
@@ -71,7 +65,6 @@ struct buffer_timeout {
 	/* context timeout information */
 	struct nvhost_hwctx *ctx;
 	int clientid;
-	bool timeout_debug_dump;
 };
 
 enum cdma_event {
@@ -120,5 +113,5 @@ void	nvhost_cdma_peek(struct nvhost_cdma *cdma,
 unsigned int nvhost_cdma_wait_locked(struct nvhost_cdma *cdma,
 		enum cdma_event event);
 void nvhost_cdma_update_sync_queue(struct nvhost_cdma *cdma,
-		struct nvhost_syncpt *syncpt, struct platform_device *dev);
+		struct nvhost_syncpt *syncpt, struct nvhost_device *dev);
 #endif

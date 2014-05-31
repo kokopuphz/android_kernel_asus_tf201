@@ -47,7 +47,6 @@
 #include "cpu-tegra.h"
 #include "pm.h"
 #include "tegra-board-id.h"
-#include "board-pmu-defines.h"
 #include "board.h"
 #include "gpio-names.h"
 #include "board-common.h"
@@ -196,8 +195,6 @@ static struct tps65090_platform_data tps65090_pdata = {
 /* MAX77663 consumer rails */
 static struct regulator_consumer_supply max77663_sd0_supply[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
-	REGULATOR_SUPPLY("vdd_core", "sdhci-tegra.0"),
-	REGULATOR_SUPPLY("vdd_core", "sdhci-tegra.3"),
 };
 
 static struct regulator_consumer_supply max77663_sd1_supply[] = {
@@ -244,8 +241,6 @@ static struct regulator_consumer_supply max77663_sd2_supply[] = {
 	REGULATOR_SUPPLY("vddio_bt_1v8", "bluedroid_pm.0"),
 	REGULATOR_SUPPLY("vdd_dtv_1v8", NULL),
 	REGULATOR_SUPPLY("vlogic", "0-0069"),
-	REGULATOR_SUPPLY("vid", "0-000d"),
-	REGULATOR_SUPPLY("vddio", "0-0078"),
 };
 
 static struct regulator_consumer_supply max77663_sd3_supply[] = {
@@ -272,8 +267,6 @@ static struct regulator_consumer_supply max77663_ldo2_supply[] = {
 	REGULATOR_SUPPLY("vdd_als", NULL),
 	REGULATOR_SUPPLY("vdd", "0-004c"),
 	REGULATOR_SUPPLY("vdd", "0-0069"),
-	REGULATOR_SUPPLY("vdd", "0-000d"),
-	REGULATOR_SUPPLY("vdd", "0-0078"),
 };
 
 static struct regulator_consumer_supply max77663_ldo3_supply[] = {
@@ -617,22 +610,44 @@ static struct regulator_consumer_supply palmas_ldousb_supply[] = {
 	REGULATOR_SUPPLY("avdd_hdmi", "tegradc.1"),
 };
 
-PALMAS_PDATA_INIT(smps12, 1350,  1350, tps65090_rails(DCDC3), 0, 0, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(smps3, 1800,  1800, tps65090_rails(DCDC3), 0, 0, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(smps45, 900,  1400, tps65090_rails(DCDC2), 1, 1, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(smps457, 900,  1400, tps65090_rails(DCDC2), 1, 1, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(smps8, 1050,  1050, tps65090_rails(DCDC2), 0, 1, 1, NORMAL, 0);
-PALMAS_PDATA_INIT(smps9, 2800,  2800, tps65090_rails(DCDC2), 1, 0, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(ldo1, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo2, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo3, 1200,  1200, palmas_rails(smps3), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo4, 1800,  1800, tps65090_rails(DCDC2), 0, 0, 0, 0, 0);
-PALMAS_PDATA_INIT(ldo6, 2850,  2850, tps65090_rails(DCDC2), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo7, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo8, 900,  900, tps65090_rails(DCDC3), 1, 1, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo9, 1800,  3300, palmas_rails(smps9), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldoln, 3300, 3300, tps65090_rails(DCDC1), 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldousb, 3300,  3300, tps65090_rails(DCDC1), 0, 0, 1, 0, 0);
+#define PALMAS_PDATA_INIT(_name, _minmv, _maxmv, _supply_reg, _always_on, \
+	_boot_on, _apply_uv)						\
+	static struct regulator_init_data reg_idata_##_name = {		\
+		.constraints = {					\
+			.name = palmas_rails(_name),			\
+			.min_uV = (_minmv)*1000,			\
+			.max_uV = (_maxmv)*1000,			\
+			.valid_modes_mask = (REGULATOR_MODE_NORMAL |	\
+					REGULATOR_MODE_STANDBY),	\
+			.valid_ops_mask = (REGULATOR_CHANGE_MODE |	\
+					REGULATOR_CHANGE_STATUS |	\
+					REGULATOR_CHANGE_VOLTAGE),	\
+			.always_on = _always_on,			\
+			.boot_on = _boot_on,				\
+			.apply_uV = _apply_uv,				\
+		},							\
+		.num_consumer_supplies =				\
+			ARRAY_SIZE(palmas_##_name##_supply),		\
+		.consumer_supplies = palmas_##_name##_supply,		\
+		.supply_regulator = _supply_reg,			\
+	}
+
+PALMAS_PDATA_INIT(smps12, 1350,  1350, tps65090_rails(DCDC3), 0, 0, 0);
+PALMAS_PDATA_INIT(smps3, 1800,  1800, tps65090_rails(DCDC3), 0, 0, 0);
+PALMAS_PDATA_INIT(smps45, 900,  1400, tps65090_rails(DCDC2), 1, 1, 0);
+PALMAS_PDATA_INIT(smps457, 900,  1400, tps65090_rails(DCDC2), 1, 1, 0);
+PALMAS_PDATA_INIT(smps8, 1050,  1050, tps65090_rails(DCDC2), 0, 1, 1);
+PALMAS_PDATA_INIT(smps9, 2800,  2800, tps65090_rails(DCDC2), 1, 0, 0);
+PALMAS_PDATA_INIT(ldo1, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1);
+PALMAS_PDATA_INIT(ldo2, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1);
+PALMAS_PDATA_INIT(ldo3, 1200,  1200, palmas_rails(smps3), 0, 0, 1);
+PALMAS_PDATA_INIT(ldo4, 1800,  1800, tps65090_rails(DCDC2), 0, 0, 0);
+PALMAS_PDATA_INIT(ldo6, 2850,  2850, tps65090_rails(DCDC2), 0, 0, 1);
+PALMAS_PDATA_INIT(ldo7, 2800,  2800, tps65090_rails(DCDC2), 0, 0, 1);
+PALMAS_PDATA_INIT(ldo8, 900,  900, tps65090_rails(DCDC3), 1, 1, 1);
+PALMAS_PDATA_INIT(ldo9, 1800,  3300, palmas_rails(smps9), 0, 0, 1);
+PALMAS_PDATA_INIT(ldoln, 3300, 3300, tps65090_rails(DCDC1), 0, 0, 1);
+PALMAS_PDATA_INIT(ldousb, 3300,  3300, tps65090_rails(DCDC1), 0, 0, 1);
 
 #define PALMAS_REG_PDATA(_sname) &reg_idata_##_sname
 
@@ -1203,21 +1218,21 @@ static struct soctherm_platform_data dalmore_soctherm_data = {
 			.trips = {
 				{
 					.cdev_type = "tegra-balanced",
-					.trip_temp = 90000,
+					.trip_temp = 84000,
 					.trip_type = THERMAL_TRIP_PASSIVE,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,
 				},
 				{
 					.cdev_type = "tegra-heavy",
-					.trip_temp = 100000,
+					.trip_temp = 94000,
 					.trip_type = THERMAL_TRIP_HOT,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,
 				},
 				{
 					.cdev_type = "tegra-shutdown",
-					.trip_temp = 102000,
+					.trip_temp = 104000,
 					.trip_type = THERMAL_TRIP_CRITICAL,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,
@@ -1254,8 +1269,7 @@ int __init dalmore_soctherm_init(void)
 		dalmore_soctherm_data.tshut_pmu_trip_data = &tpdata_max77663;
 
 	tegra_platform_edp_init(dalmore_soctherm_data.therm[THERM_CPU].trips,
-			&dalmore_soctherm_data.therm[THERM_CPU].num_trips,
-			8000); /* edp temperature margin */
+			&dalmore_soctherm_data.therm[THERM_CPU].num_trips);
 	tegra_add_tj_trips(dalmore_soctherm_data.therm[THERM_CPU].trips,
 			&dalmore_soctherm_data.therm[THERM_CPU].num_trips);
 

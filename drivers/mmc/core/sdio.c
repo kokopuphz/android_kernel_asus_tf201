@@ -9,13 +9,12 @@
  * your option) any later version.
  */
 
+#include <linux/export.h>
 #include <linux/err.h>
-#include <linux/module.h>
 #include <linux/pm_runtime.h>
 
 #include <linux/mmc/host.h>
 #include <linux/mmc/card.h>
-#include <linux/mmc/mmc.h>
 #include <linux/mmc/sdio.h>
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/sdio_ids.h>
@@ -103,11 +102,10 @@ fail:
 	return ret;
 }
 
-static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
+static int sdio_read_cccr(struct mmc_card *card)
 {
 	int ret;
 	int cccr_vsn;
-	int uhs = ocr & R4_18V_PRESENT;
 	unsigned char data;
 	unsigned char speed;
 
@@ -155,7 +153,7 @@ static int sdio_read_cccr(struct mmc_card *card, u32 ocr)
 		card->scr.sda_spec3 = 0;
 		card->sw_caps.sd3_bus_mode = 0;
 		card->sw_caps.sd3_drv_type = 0;
-		if (cccr_vsn >= SDIO_CCCR_REV_3_00 && uhs) {
+		if (cccr_vsn >= SDIO_CCCR_REV_3_00) {
 			card->scr.sda_spec3 = 1;
 			ret = mmc_io_rw_direct(card, 0, 0,
 				SDIO_CCCR_UHS, 0, &data);
@@ -488,27 +486,23 @@ static int sdio_set_bus_speed_mode(struct mmc_card *card)
 			bus_speed = SDIO_SPEED_SDR104;
 			timing = MMC_TIMING_UHS_SDR104;
 			card->sw_caps.uhs_max_dtr = UHS_SDR104_MAX_DTR;
-			card->sd_bus_speed = UHS_SDR104_BUS_SPEED;
 	} else if ((card->host->caps & MMC_CAP_UHS_DDR50) &&
 		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50)) {
 			bus_speed = SDIO_SPEED_DDR50;
 			timing = MMC_TIMING_UHS_DDR50;
 			card->sw_caps.uhs_max_dtr = UHS_DDR50_MAX_DTR;
-			card->sd_bus_speed = UHS_DDR50_BUS_SPEED;
 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
 		    MMC_CAP_UHS_SDR50)) && (card->sw_caps.sd3_bus_mode &
 		    SD_MODE_UHS_SDR50)) {
 			bus_speed = SDIO_SPEED_SDR50;
 			timing = MMC_TIMING_UHS_SDR50;
 			card->sw_caps.uhs_max_dtr = UHS_SDR50_MAX_DTR;
-			card->sd_bus_speed = UHS_SDR50_BUS_SPEED;
 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
 		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25)) &&
 		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR25)) {
 			bus_speed = SDIO_SPEED_SDR25;
 			timing = MMC_TIMING_UHS_SDR25;
 			card->sw_caps.uhs_max_dtr = UHS_SDR25_MAX_DTR;
-			card->sd_bus_speed = UHS_SDR25_BUS_SPEED;
 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
 		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25 |
 		    MMC_CAP_UHS_SDR12)) && (card->sw_caps.sd3_bus_mode &
@@ -516,7 +510,6 @@ static int sdio_set_bus_speed_mode(struct mmc_card *card)
 			bus_speed = SDIO_SPEED_SDR12;
 			timing = MMC_TIMING_UHS_SDR12;
 			card->sw_caps.uhs_max_dtr = UHS_SDR12_MAX_DTR;
-			card->sd_bus_speed = UHS_SDR12_BUS_SPEED;
 	}
 
 	err = mmc_io_rw_direct(card, 0, 0, SDIO_CCCR_SPEED, 0, &speed);
@@ -568,8 +561,7 @@ static int mmc_sdio_init_uhs_card(struct mmc_card *card)
 
 	/* Initialize and start re-tuning timer */
 	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning)
-		err = card->host->ops->execute_tuning(card->host,
-						      MMC_SEND_TUNING_BLOCK);
+		err = card->host->ops->execute_tuning(card->host);
 
 out:
 
@@ -595,19 +587,7 @@ static int mmc_sdio_init_card(struct mmc_host *host, u32 ocr,
 	 * Inform the card of the voltage
 	 */
 	if (!powered_resume) {
-		/* The initialization should be done at 3.3 V I/O voltage. */
-		mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330, 0);
-		/*
-		 * If the host supports any of the UHS modes, check whether
-		 * the card supports 1.8V signalling voltage.
-		 */
-		if (host->caps &
-			(MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
-			MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR104 |
-			MMC_CAP_UHS_DDR50)) {
-			ocr |= R4_18V_PRESENT;
-		}
-		err = mmc_send_io_op_cond(host, ocr, &ocr);
+		err = mmc_send_io_op_cond(host, host->ocr, &ocr);
 		if (err)
 			goto err;
 	}
@@ -692,6 +672,8 @@ static int mmc_sdio_init_card(struct mmc_host *host, u32 ocr,
 		 */
 		if (oldcard)
 			oldcard->rca = card->rca;
+
+		mmc_set_bus_mode(host, MMC_BUSMODE_PUSHPULL);
 	}
 
 	/*
@@ -739,7 +721,7 @@ static int mmc_sdio_init_card(struct mmc_host *host, u32 ocr,
 		/*
 		 * Read the common registers.
 		 */
-		err = sdio_read_cccr(card,  ocr);
+		err = sdio_read_cccr(card);
 		if (err)
 			goto remove;
 #ifdef CONFIG_MMC_EMBEDDED_SDIO
@@ -860,14 +842,6 @@ static void mmc_sdio_remove(struct mmc_host *host)
 }
 
 /*
- * Card detection - card is alive.
- */
-static int mmc_sdio_alive(struct mmc_host *host)
-{
-	return mmc_select_card(host->card);
-}
-
-/*
  * Card detection callback from host.
  */
 static void mmc_sdio_detect(struct mmc_host *host)
@@ -889,7 +863,7 @@ static void mmc_sdio_detect(struct mmc_host *host)
 	/*
 	 * Just check if our card has been removed.
 	 */
-	err = _mmc_detect_card_removed(host);
+	err = mmc_select_card(host->card);
 
 	mmc_release_host(host);
 
@@ -981,7 +955,7 @@ static int mmc_sdio_resume(struct mmc_host *host)
 	}
 
 	if (!err && host->sdio_irqs)
-		wake_up_process(host->sdio_irq_thread);
+		mmc_signal_sdio_irq(host);
 	mmc_release_host(host);
 
 	/*
@@ -1033,11 +1007,6 @@ static int mmc_sdio_power_restore(struct mmc_host *host)
 	 * With these steps taken, mmc_select_voltage() is also required to
 	 * restore the correct voltage setting of the card.
 	 */
-
-	/* The initialization should be done at 3.3 V I/O voltage. */
-	if (!mmc_card_keep_power(host))
-		mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_330, 0);
-
 	sdio_reset(host);
 	mmc_go_idle(host);
 	mmc_send_if_cond(host, host->ocr_avail);
@@ -1055,7 +1024,8 @@ static int mmc_sdio_power_restore(struct mmc_host *host)
 		goto out;
 	}
 
-	ret = mmc_sdio_init_card(host, host->ocr, host->card, 0);
+	ret = mmc_sdio_init_card(host, host->ocr, host->card,
+				mmc_card_keep_power(host));
 	if (!ret && host->sdio_irqs)
 		mmc_signal_sdio_irq(host);
 
@@ -1071,7 +1041,6 @@ static const struct mmc_bus_ops mmc_sdio_ops = {
 	.suspend = mmc_sdio_suspend,
 	.resume = mmc_sdio_resume,
 	.power_restore = mmc_sdio_power_restore,
-	.alive = mmc_sdio_alive,
 };
 
 
@@ -1100,7 +1069,7 @@ int mmc_attach_sdio(struct mmc_host *host)
 	 * support.
 	 */
 	if (ocr & 0x7F) {
-		pr_warning("%s: card claims to support voltages "
+		printk(KERN_WARNING "%s: card claims to support voltages "
 		       "below the defined range. These will be ignored.\n",
 		       mmc_hostname(host));
 		ocr &= ~0x7F;
@@ -1228,7 +1197,7 @@ remove:
 err:
 	mmc_detach_bus(host);
 
-	pr_err("%s: error %d whilst initialising SDIO card\n",
+	printk(KERN_ERR "%s: error %d whilst initialising SDIO card\n",
 		mmc_hostname(host), err);
 
 	return err;
@@ -1241,7 +1210,6 @@ int sdio_reset_comm(struct mmc_card *card)
 	int err;
 
 	printk("%s():\n", __func__);
-
 	mmc_claim_host(host);
 
 	mmc_go_idle(host);
@@ -1258,8 +1226,46 @@ int sdio_reset_comm(struct mmc_card *card)
 		goto err;
 	}
 
-	err = mmc_sdio_init_card(host, host->ocr, card, 0);
+	err = mmc_send_io_op_cond(host, host->ocr, &ocr);
 	if (err)
+		goto err;
+
+	if (mmc_host_is_spi(host)) {
+		err = mmc_spi_set_crc(host, use_spi_crc);
+		if (err)
+			goto err;
+	}
+
+	if (!mmc_host_is_spi(host)) {
+		err = mmc_send_relative_addr(host, &card->rca);
+		if (err)
+			goto err;
+		mmc_set_bus_mode(host, MMC_BUSMODE_PUSHPULL);
+	}
+	if (!mmc_host_is_spi(host)) {
+		err = mmc_select_card(card);
+		if (err)
+			goto err;
+	}
+
+	/*
+	 * Switch to high-speed (if supported).
+	 */
+	err = sdio_enable_hs(card);
+	if (err > 0)
+		mmc_sd_go_highspeed(card);
+	else if (err)
+		goto err;
+
+	/*
+	 * Change to the card's maximum speed.
+	 */
+	mmc_set_clock(host, mmc_sdio_get_max_clock(card));
+
+	err = sdio_enable_4bit_bus(card);
+	if (err > 0)
+		mmc_set_bus_width(host, MMC_BUS_WIDTH_4);
+	else if (err)
 		goto err;
 
 	mmc_release_host(host);

@@ -3,7 +3,7 @@
  *
  * Tegra Graphics Init for Tegra11 Architecture Chips
  *
- * Copyright (c) 2011-2013, NVIDIA Corporation.
+ * Copyright (c) 2011-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -124,7 +124,7 @@ static struct nvhost_device_data tegra_gr3d03_info = {
 			    {"emc", UINT_MAX, 75} },
 	.powergate_ids	= { TEGRA_POWERGATE_3D, -1 },
 	NVHOST_DEFAULT_CLOCKGATE_DELAY,
-	.can_powergate	= false,
+	.can_powergate	= true,
 	.powergate_delay = 250,
 	.powerup_reset	= true,
 	.moduleid	= NVHOST_MODULE_NONE,
@@ -149,7 +149,7 @@ static struct nvhost_device_data tegra_gr2d03_info = {
 			    {"emc", 300000000, 75 } },
 	.powergate_ids	= { TEGRA_POWERGATE_HEG, -1 },
 	.clockgate_delay = 0,
-	.can_powergate  = false,
+	.can_powergate  = true,
 	.powergate_delay = 100,
 	.powerup_reset	= true,
 	.moduleid	= NVHOST_MODULE_NONE,
@@ -177,6 +177,7 @@ static struct nvhost_device_data tegra_isp01_info = {
 	.index		= 3,
 	.syncpts	= BIT(NVSYNCPT_VI_ISP_2) | BIT(NVSYNCPT_VI_ISP_3) |
 			  BIT(NVSYNCPT_VI_ISP_4),
+	.clocks		= { {"epp", 0} },
 	.keepalive	= true,
 	NVHOST_MODULE_NO_POWERGATE_IDS,
 	NVHOST_DEFAULT_CLOCKGATE_DELAY,

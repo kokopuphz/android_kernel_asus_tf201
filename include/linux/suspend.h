@@ -185,6 +185,10 @@ struct platform_suspend_ops {
 	void (*recover)(void);
 };
 
+#ifdef CONFIG_EARLYSUSPEND
+extern suspend_state_t get_suspend_state(void);
+#endif
+
 #ifdef CONFIG_SUSPEND
 /**
  * suspend_set_ops - set platform dependent suspend operations
@@ -212,6 +216,9 @@ extern void arch_suspend_disable_irqs(void);
 extern void arch_suspend_enable_irqs(void);
 
 extern int pm_suspend(suspend_state_t state);
+#ifdef CONFIG_MACH_ENDEAVORU
+extern bool is_resume_from_deep_suspend(void);
+#endif
 #else /* !CONFIG_SUSPEND */
 #define suspend_valid_only_mem	NULL
 

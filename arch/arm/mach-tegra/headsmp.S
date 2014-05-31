@@ -3,7 +3,7 @@
  *
  * CPU initialization routines for Tegra SoCs
  *
- * Copyright (c) 2009-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2009-2012, NVIDIA Corporation.
  * Copyright (c) 2011 Google, Inc.
  * Author: Colin Cross <ccross@android.com>
  *         Gary King <gking@nvidia.com>
@@ -39,6 +39,10 @@
 #define DEBUG_CPU_RESET_HANDLER	0	/* Non-zero enables debug code */
 
 #define RESET_DATA(x)	((TEGRA_RESET_##x)*4)
+
+/* EternityProject: This file needs to be built unconditionally as ARM
+ * to interoperate correctly with non-Thumb-2-capable firmware. */
+	.arm
 
 #ifdef CONFIG_SMP
 /*
@@ -82,7 +86,7 @@ ENTRY(tegra_resume)
 #ifdef CONFIG_TRUSTED_FOUNDATIONS
 	mov32	r1, TEGRA_TMRUS_BASE
 	ldr	r0, [r1]
-	adr	r1, tegra_resume_entry_time
+	adr	r1, BSYM(tegra_resume_entry_time)
 	str	r0, [r1]
 #endif
 
@@ -117,15 +121,16 @@ ENTRY(tegra_resume)
 #ifndef CONFIG_ARCH_TEGRA_11x_SOC
 	mov32	r1, TEGRA_TMRUS_BASE
 	ldr	r0, [r1]
-	adr	r1, tegra_resume_smc_entry_time
+	adr	r1, BSYM(tegra_resume_smc_entry_time)
 	str	r0, [r1]
 
-	/* wake up (should have specified args?) */
-	bl	tegra_generic_smc
+	/* EternityProject, 14/03/2013: Instruct SMC for wake up */
+	mov	r0, #0x00000003
+	bl	tegra_generic_smc_local
 
 	mov32	r1, TEGRA_TMRUS_BASE
 	ldr	r0, [r1]
-	adr	r1, tegra_resume_smc_exit_time
+	adr	r1, BSYM(tegra_resume_smc_exit_time)
 	str	r0, [r1]
 #endif
 #endif
@@ -158,26 +163,42 @@ ENTRY(__tegra_resume_timestamps_end)
  *	__invalidate_cpu_state
  *
  *	  Invalidates volatile CPU state (SCU tags, caches, branch address
- *	  arrays, exclusive monitor, etc.) so that they can be safely
- *	  enabled. Instruction caching and branch prediction are enabled.
+ *	  arrays, exclusive monitor, etc.) so that they can be safely enabled
+ *	  instruction caching and branch predicition enabled
  *
- *	  Cortex-A15 has an integrated SCU in L2 memory system, we only
- *	  need to set the correct L2 cache data RAM latency and enable
- *	  i-cache/branch prediction.
+ *	  For tegra chips with CONFIG_HAVE_ARM_SCU undefined, it means there is
+ *	  an integrated SCU in L2 memory system, this is true for Cortex-A15
+ *	  MP processors. In this case, we only need to set the correct L2 cache
+ *	  data RAM latency and enable i-cache/branch prediction
  */
 __invalidate_cpu_state:
 	clrex
 	mov	r0, #0
 	mcr	p15, 0, r0, c1, c0, 1	@ disable SMP, prefetch, broadcast
 	isb
-	mrc	p15, 0, r0, c0, c0, 0	@ main ID register
-	ubfx	r1, r0, #4, #28
-	ldr	r0, =0x00f0000
-	bic	r1, r1, r0
-	ldr	r0, =0x410fc09
-	teq	r1, r0
-	beq	cortex_a9
+#if defined(CONFIG_HAVE_ARM_SCU)
+	mcr	p15, 0, r0, c7, c5, 0	@ invalidate BTAC, i-cache
+	mcr	p15, 0, r0, c7, c5, 6	@ invalidate branch pred array
+	mcr	p15, 0, r0, c8, c5, 0	@ invalidate instruction TLB
+	mcr	p15, 0, r0, c8, c6, 0	@ invalidate data TLB
+	mcr	p15, 0, r0, c8, c7, 0	@ invalidate unified TLB
+	dsb
+	isb
 
+	cpu_id	r0
+	cmp	r0, #0
+	mov32	r1, (TEGRA_ARM_PERIF_BASE + 0xC)
+	movne	r0, r0, lsl #2
+	movne	r2, #0xf
+	movne	r2, r2, lsl r0
+	strne	r2, [r1]		@ invalidate SCU tags for CPU
+
+	dsb
+	mov	r0, #0x1800
+	mcr	p15, 0, r0, c1, c0, 0	@ enable branch prediction, i-cache
+	isb
+	/* fall through */
+#else
 	mrc	p15, 0x1, r0, c15, c0, 3	@ L2 prefetch control reg
 	tst	r0, #0x1000
 	orreq	r0, r0, #0x1000			@ disable throttling
@@ -203,34 +224,16 @@ __enable_i_cache_branch_pred:
 	mcr	p15, 0, r0, c1, c0, 0	@ enable branch prediction, i-cache
 	mov	pc, lr
 	/* no fall through, just return to the caller */
-
-cortex_a9:
-	/* Following is for Cortex-A9 */
-	mcr	p15, 0, r0, c7, c5, 0	@ invalidate BTAC, i-cache
-	mcr	p15, 0, r0, c7, c5, 6	@ invalidate branch pred array
-	mcr	p15, 0, r0, c8, c5, 0	@ invalidate instruction TLB
-	mcr	p15, 0, r0, c8, c6, 0	@ invalidate data TLB
-	mcr	p15, 0, r0, c8, c7, 0	@ invalidate unified TLB
-	dsb
-	isb
-
-#if defined(CONFIG_HAVE_ARM_SCU)
-	cpu_id	r0
-	cmp	r0, #0
-	mov32	r1, (TEGRA_ARM_PERIF_BASE + 0xC)
-	movne	r0, r0, lsl #2
-	movne	r2, #0xf
-	movne	r2, r2, lsl r0
-	strne	r2, [r1]		@ invalidate SCU tags for CPU
 #endif
 
-	dsb
-	mov	r0, #0x1800
-	mcr	p15, 0, r0, c1, c0, 0	@ enable branch prediction, i-cache
-	isb
-
-	/* Invalidates L1 d-cache during initial cpu boot (corrupt r0-r6) */
-
+/*
+ *	tegra_invalidate_cache
+ *
+ *	  Invalidates the L1 data cache (no clean) during initial boot of a cpu
+ *
+ *	  Corrupted registers: r0-r6
+ */
+tegra_invalidate_cache:
 	mov	r0, #0
 	mcr	p15, 2, r0, c0, c0, 0
 	mrc	p15, 1, r0, c0, c0, 0

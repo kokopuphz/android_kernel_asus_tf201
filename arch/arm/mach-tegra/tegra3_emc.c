@@ -787,6 +787,11 @@ int tegra_emc_backup(unsigned long rate)
 /* Select the closest EMC rate that is higher than the requested rate */
 long tegra_emc_round_rate(unsigned long rate)
 {
+	return tegra_emc_round_rate_updown(rate, true);
+}
+
+long tegra_emc_round_rate_updown(unsigned long rate, bool up)
+{
 	int i;
 	int best = -1;
 	unsigned long distance = ULONG_MAX;
@@ -806,8 +811,10 @@ long tegra_emc_round_rate(unsigned long rate)
 		if (tegra_emc_clk_sel[i].input == NULL)
 			continue;	/* invalid entry */
 
-		if (tegra_emc_table[i].rate >= rate &&
-		    (tegra_emc_table[i].rate - rate) < distance) {
+		if ((rate - tegra_emc_table[i].rate) < distance &&
+			((up && tegra_emc_table[i].rate >= rate) ||
+			(!up && tegra_emc_table[i].rate <= rate))
+		) {
 			distance = tegra_emc_table[i].rate - rate;
 			best = i;
 		}

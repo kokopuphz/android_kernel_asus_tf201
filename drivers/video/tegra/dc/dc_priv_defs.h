@@ -46,8 +46,6 @@
 #define CURSOR_CLIP_SHIFT_BITS(win)	(win << 29)
 #define CURSOR_CLIP_GET_WINDOW(reg)	((reg >> 29) & 3)
 
-#define BLANK_ALL	(~0)
-
 #ifndef CONFIG_TEGRA_FPGA_PLATFORM
 #define ALL_UF_INT (WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT)
 #else
@@ -134,6 +132,10 @@ struct tegra_dc {
 
 	struct mutex			lock;
 	struct mutex			one_shot_lock;
+#ifdef CONFIG_MACH_ENDEAVORU
+	struct mutex			host_lock;
+	struct mutex			vsync_lock;
+#endif
 
 	struct resource			*fb_mem;
 	struct tegra_fb_info		*fb;

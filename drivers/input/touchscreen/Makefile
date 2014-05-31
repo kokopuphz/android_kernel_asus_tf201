@@ -73,3 +73,13 @@ obj-$(CONFIG_TOUCHSCREEN_W90X900)	+= w90p910_ts.o
 obj-$(CONFIG_TOUCHSCREEN_TPS6507X)	+= tps6507x-ts.o
 obj-$(CONFIG_TOUCHSCREEN_RM31080A)	+= rm31080a_ts.o rm31080a_ctrl.o
 obj-$(CONFIG_TOUCHSCREEN_SYN_RMI4_SPI)  += rmi4/
+
+
+
+# EternityProject: LGE X3 Support
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_T3000)  += lge_touch_driver.o
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_T3000)  += lge_touch_synaptics.o
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_COMMON) += lge_touch_core.o
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_COMMON) += touch_synaptics.o
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_COMMON) += touch_synaptics_fw_upgrade_2.o
+

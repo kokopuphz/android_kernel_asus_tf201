@@ -26,6 +26,7 @@ obj-$(CONFIG_SND_SOC_TEGRA20_SPDIF) += snd-soc-tegra20-spdif.o
 obj-$(CONFIG_SND_SOC_TEGRA30_SPDIF) += snd-soc-tegra30-spdif.o
 
 # Tegra machine Support
+ifneq ($(CONFIG_SND_SOC_TLV320AIC3008),y)
 snd-soc-tegra-wm8903-objs := tegra_wm8903.o
 snd-soc-tegra-trimslice-objs := trimslice.o
 snd-soc-tegra-alc5632-objs := tegra_alc5632.o
@@ -48,3 +49,9 @@ obj-$(CONFIG_SND_SOC_TEGRA_MAX98095) += snd-soc-tegra-max98095.o
 obj-$(CONFIG_SND_SOC_TEGRA_P1852) += snd-soc-tegra-vcm.o
 obj-$(CONFIG_SND_SOC_TEGRA_P852) += snd-soc-tegra-vcm.o
 obj-$(CONFIG_SND_SOC_TEGRA_CS42L73) += snd-soc-tegra-cs42l73.o
+endif
+
+# EternityProject Drivers
+ifeq ($(CONFIG_SND_SOC_TLV320AIC3008),y)
+obj-$(CONFIG_SND_SOC_TLV320AIC3008)	+= tegra_aic3008.o
+endif

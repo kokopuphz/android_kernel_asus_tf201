@@ -279,7 +279,6 @@ struct palmas_pmic {
 	int smps457;
 
 	unsigned int ramp_delay[PALMAS_NUM_REGS];
-	unsigned int current_mode_reg[PALMAS_NUM_REGS];
 
 	int range[PALMAS_REG_SMPS10];
 };

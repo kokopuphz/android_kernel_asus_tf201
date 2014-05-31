@@ -9,9 +9,9 @@
  * your option) any later version.
  */
 
+#include <linux/export.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include <linux/export.h>
 #include <linux/scatterlist.h>
 
 #include <linux/mmc/host.h>
@@ -68,7 +68,7 @@ EXPORT_SYMBOL_GPL(mmc_app_cmd);
 int mmc_wait_for_app_cmd(struct mmc_host *host, struct mmc_card *card,
 	struct mmc_command *cmd, int retries)
 {
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 
 	int i, err;
 
@@ -245,7 +245,7 @@ int mmc_send_relative_addr(struct mmc_host *host, unsigned int *rca)
 int mmc_app_send_scr(struct mmc_card *card, u32 *scr)
 {
 	int err;
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
 	struct scatterlist sg;
@@ -304,7 +304,7 @@ int mmc_app_send_scr(struct mmc_card *card, u32 *scr)
 int mmc_sd_switch(struct mmc_card *card, int mode, int group,
 	u8 value, u8 *resp)
 {
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
 	struct scatterlist sg;
@@ -349,7 +349,7 @@ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
 int mmc_app_sd_status(struct mmc_card *card, void *ssr)
 {
 	int err;
-	struct mmc_request mrq = {NULL};
+	struct mmc_request mrq = {0};
 	struct mmc_command cmd = {0};
 	struct mmc_data data = {0};
 	struct scatterlist sg;
@@ -390,29 +390,3 @@ int mmc_app_sd_status(struct mmc_card *card, void *ssr)
 
 	return 0;
 }
-
-int mmc_send_speed_class_ctrl(struct mmc_host *host,
-	unsigned int speed_class_ctrl_arg)
-{
-	int err = 0;
-	struct mmc_command cmd = {
-			.opcode = SD_SPEED_CLASS_CONTROL,
-			.arg = (speed_class_ctrl_arg << 28),
-			.flags = MMC_RSP_R1B | MMC_CMD_AC | MMC_RSP_BUSY,
-		};
-
-	BUG_ON(!host);
-	BUG_ON(speed_class_ctrl_arg > 3);
-	err = mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
-	if (err)
-		return err;
-
-	/*
-	 * If the host does not wait while the card signals busy, then we will
-	 * will have to wait the max busy indication timeout.
-	 */
-	if (!(host->caps & MMC_CAP_WAIT_WHILE_BUSY))
-		mmc_delay(1000);
-	return err;
-}
-

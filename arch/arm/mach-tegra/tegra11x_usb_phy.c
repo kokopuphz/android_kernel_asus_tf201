@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/tegra11x_usb_phy.c
  *
- * Copyright (c) 2012-2013 NVIDIA Corporation. All rights reserved.
+ * Copyright (C) 2012-2013 NVIDIA Corporation
  *
  *
  * This software is licensed under the terms of the GNU General Public
@@ -76,8 +76,6 @@
 #define   USB_PORTSC_RWC_BITS (USB_PORTSC_CSC | USB_PORTSC_PEC | USB_PORTSC_OCC)
 #define   USB_PORTSC_PSPD_MASK	3
 #define   USB_PORTSC_LINE_STATE(x) (((x) & (0x3 << 10)) >> 10)
-#define USB_PORTSC_LINE_DM_SET (1 << 0)
-#define USB_PORTSC_LINE_DP_SET (1 << 1)
 
 #define HOSTPC1_DEVLC		0x1b4
 #define   HOSTPC1_DEVLC_PHCD		(1 << 22)
@@ -116,8 +114,6 @@
 #define   ULPI_PADS_CLKEN_RESET		(1 << 24)
 
 #define USB_PHY_VBUS_WAKEUP_ID	0x408
-#define   VDCD_DET_STS		(1 << 26)
-#define   VDCD_DET_CHG_DET	(1 << 25)
 #define   VDAT_DET_INT_EN	(1 << 16)
 #define   VDAT_DET_CHG_DET	(1 << 17)
 #define   VDAT_DET_STS		(1 << 18)
@@ -167,7 +163,6 @@
 #define   UTMIP_XCVR_SETUP(x)			(((x) & 0xf) << 0)
 #define   UTMIP_XCVR_LSRSLEW(x)			(((x) & 0x3) << 8)
 #define   UTMIP_XCVR_LSFSLEW(x)			(((x) & 0x3) << 10)
-#define   UTMIP_XCVR_FSLEW(x)			(((x) & 0x3) << 6)
 #define   UTMIP_FORCE_PD_POWERDOWN		(1 << 14)
 #define   UTMIP_FORCE_PD2_POWERDOWN		(1 << 16)
 #define   UTMIP_FORCE_PDZI_POWERDOWN		(1 << 18)
@@ -202,11 +197,8 @@
 
 #define UTMIP_BAT_CHRG_CFG0 0x830
 #define   UTMIP_PD_CHRG			(1 << 0)
-#define   UTMIP_OP_SINK_EN		(1 << 1)
 #define   UTMIP_ON_SINK_EN		(1 << 2)
 #define   UTMIP_OP_SRC_EN		(1 << 3)
-#define   UTMIP_ON_SRC_EN		(1 << 4)
-#define   UTMIP_OP_I_SRC_EN		(1 << 5)
 
 #define UTMIP_XCVR_CFG1		0x838
 #define   UTMIP_FORCE_PDDISC_POWERDOWN	(1 << 0)
@@ -627,12 +619,6 @@ static int _usb_phy_init(struct tegra_usb_phy *phy)
 	val |= USB_PORT_SUSPEND_EN;
 	writel(val, base + USB_IF_SPARE);
 
-	if (phy->pdata->unaligned_dma_buf_supported == true) {
-		val = readl(base + USB_NEW_CONTROL);
-		val |= USB_COHRENCY_EN;
-		val |= USB_MEM_ALLIGNMENT_MUX_EN;
-		writel(val, base + USB_NEW_CONTROL);
-	}
 	val =  readl(base + TEGRA_STREAM_DISABLE);
 #if !defined(CONFIG_TEGRA_SILICON_PLATFORM)
 	val |= TEGRA_STREAM_DISABLE_OFFSET;
@@ -1315,8 +1301,8 @@ static int utmi_phy_irq(struct tegra_usb_phy *phy)
 		DBG("USB_USBMODE[0x%x] USB_USBCMD[0x%x]\n",
 			readl(base + USB_USBMODE), readl(base + USB_USBCMD));
 	}
-	if (!phy->pdata->unaligned_dma_buf_supported)
-		usb_phy_fence_read(phy);
+
+	usb_phy_fence_read(phy);
 	/* check if it is pmc wake event */
 	if (utmi_phy_pmc_wake_detected(phy))
 		remote_wakeup = phy->pmc_remote_wakeup;
@@ -1417,8 +1403,7 @@ static int utmi_phy_power_off(struct tegra_usb_phy *phy)
 			pr_err("%s: timeout waiting for USB_USBSTS_HCH\n"
 							, __func__);
 		}
-		if (!phy->pdata->port_otg)
-			utmip_setup_pmc_wake_detect(phy);
+		utmip_setup_pmc_wake_detect(phy);
 	}
 
 	if (!phy->hot_plug) {
@@ -1566,8 +1551,6 @@ static int utmi_phy_power_on(struct tegra_usb_phy *phy)
 		 UTMIP_XCVR_LSRSLEW(~0) | UTMIP_XCVR_HSSLEW_MSB(~0));
 	val |= UTMIP_XCVR_SETUP(phy->utmi_xcvr_setup);
 	val |= UTMIP_XCVR_SETUP_MSB(XCVR_SETUP_MSB_CALIB(phy->utmi_xcvr_setup));
-	if (phy->inst == 2)
-		val |= UTMIP_XCVR_FSLEW(1);
 	val |= UTMIP_XCVR_LSFSLEW(config->xcvr_lsfslew);
 	val |= UTMIP_XCVR_LSRSLEW(config->xcvr_lsrslew);
 	if (!config->xcvr_use_lsb)
@@ -1781,100 +1764,17 @@ static int utmi_phy_resume(struct tegra_usb_phy *phy)
 	return status;
 }
 
-static unsigned long utmi_phy_set_dp_dm_pull_up_down(struct tegra_usb_phy *phy,
-		unsigned long pull_up_down_flags)
-{
-	unsigned long val;
-	unsigned long org;
-	void __iomem *base = phy->regs;
-
-	org = readl(base + UTMIP_MISC_CFG0);
-
-	val = org & ~MASK_ALL_PULLUP_PULLDOWN;
-	val |= pull_up_down_flags;
-
-	writel(val, base + UTMIP_MISC_CFG0);
-
-	usleep_range(500, 2000);
-	return org;
-}
-
-unsigned long utmi_phy_get_dp_dm_status(struct tegra_usb_phy *phy,
-		unsigned long pull_up_down_flags)
-{
-	void __iomem *base = phy->regs;
-	unsigned long org_flags;
-	unsigned long ret;
-
-	org_flags = utmi_phy_set_dp_dm_pull_up_down(phy, pull_up_down_flags);
-	ret = USB_PORTSC_LINE_STATE(readl(base + USB_PORTSC));
-	utmi_phy_set_dp_dm_pull_up_down(phy, org_flags);
-	return ret;
-}
-
-/*
- * Per Battery Charging Specification 1.2  section 3.2.3:
- * We check Data Contact Detect (DCD) before we check the USB cable type.
- */
-static bool utmi_phy_dcd_detect(struct tegra_usb_phy *phy)
-{
-	void __iomem *base = phy->regs;
-	unsigned long val;
-	unsigned long org_flags;
-	bool ret;
-
-	val = readl(base + UTMIP_BAT_CHRG_CFG0);
-	/* inject IDP_SRC */
-	val |= UTMIP_OP_I_SRC_EN;
-	writel(val, base + UTMIP_BAT_CHRG_CFG0);
-	/* enable pull down resistor RDM_DWN on D- */
-	org_flags = utmi_phy_set_dp_dm_pull_up_down(phy,
-				DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-				DISABLE_PULLDN_DP | FORCE_PULLDN_DM);
-	usleep_range(20000, 30000);
-
-	ret = false;
-	if (0 == USB_PORTSC_LINE_STATE(readl(base + USB_PORTSC))) {
-		/* minimum debounce time is 10mS per TDCD_DBNC */
-		usleep_range(10000, 12000);
-		if (0 == USB_PORTSC_LINE_STATE(readl(base + USB_PORTSC)))
-			ret = true;
-	}
-
-	val &= ~UTMIP_OP_I_SRC_EN;
-	writel(val, base + UTMIP_BAT_CHRG_CFG0);
-	utmi_phy_set_dp_dm_pull_up_down(phy, org_flags);
-	return ret;
-}
-
 static bool utmi_phy_charger_detect(struct tegra_usb_phy *phy)
 {
 	unsigned long val;
 	void __iomem *base = phy->regs;
 	bool status;
-	int dcd_timeout_ms;
 
 	DBG("%s(%d) inst:[%d]\n", __func__, __LINE__, phy->inst);
 	if (phy->pdata->op_mode != TEGRA_USB_OPMODE_DEVICE) {
 		/* Charger detection is not there for ULPI
 		 * return Charger not available */
 		return false;
-	}
-
-	/* DCD timeout max value is 900mS */
-	dcd_timeout_ms = 0;
-	while (dcd_timeout_ms < 900) {
-		/* standard DCD detect for SDP/DCP/CDP */
-		if (utmi_phy_dcd_detect(phy))
-			break;
-		/* for NV-charger, we wait D+/D- both set */
-		if ((USB_PORTSC_LINE_DP_SET | USB_PORTSC_LINE_DM_SET) ==
-			utmi_phy_get_dp_dm_status(phy,
-				DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-				DISABLE_PULLDN_DP | DISABLE_PULLDN_DM))
-			break;
-		usleep_range(20000, 22000);
-		dcd_timeout_ms += 22;
 	}
 
 	/* Enable charger detection logic */
@@ -1908,81 +1808,60 @@ static bool utmi_phy_charger_detect(struct tegra_usb_phy *phy)
 	return status;
 }
 
-static bool utmi_phy_is_non_std_charger(struct tegra_usb_phy *phy)
-{
-	/*
-	 * non std charger has D+/D- line float, we can apply pull up/down on
-	 * each line and verify if line status change.
-	 */
-	/* pull up DP only */
-	if (USB_PORTSC_LINE_DP_SET != utmi_phy_get_dp_dm_status(phy,
-				FORCE_PULLUP_DP | DISABLE_PULLUP_DM |
-				DISABLE_PULLDN_DP | DISABLE_PULLDN_DM))
-		goto NOT_NON_STD_CHARGER;
-
-	/* pull down DP only */
-	if (0x0 != utmi_phy_get_dp_dm_status(phy,
-				DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-				FORCE_PULLDN_DP | DISABLE_PULLDN_DM))
-		goto NOT_NON_STD_CHARGER;
-
-	/* pull up DM only */
-	if (USB_PORTSC_LINE_DM_SET != utmi_phy_get_dp_dm_status(phy,
-				DISABLE_PULLUP_DP | FORCE_PULLUP_DM |
-				DISABLE_PULLDN_DP | DISABLE_PULLDN_DM))
-		goto NOT_NON_STD_CHARGER;
-
-	/* pull down DM only */
-	if (0x0 != utmi_phy_get_dp_dm_status(phy,
-				DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-				DISABLE_PULLDN_DP | FORCE_PULLDN_DM))
-		goto NOT_NON_STD_CHARGER;
-
-	utmi_phy_set_dp_dm_pull_up_down(phy, 0);
-	return true;
-
-NOT_NON_STD_CHARGER:
-	utmi_phy_set_dp_dm_pull_up_down(phy, 0);
-	return false;
-
-}
-
 static bool utmi_phy_nv_charger_detect(struct tegra_usb_phy *phy)
 {
-	int status1;
-	int status2;
-	int status3;
-	bool ret;
-
+	unsigned long val;
+	void __iomem *base = phy->regs;
+	bool status;
 	DBG("%s(%d) inst:[%d]\n", __func__, __LINE__, phy->inst);
 
-	if (utmi_phy_is_non_std_charger(phy))
-		return false;
+	/* Turn off all terminations so we see DPDN states clearly,
+		and only leave on DM pulldown */
+	val = readl(base + UTMIP_MISC_CFG0);
+	val &= ~MASK_ALL_PULLUP_PULLDOWN;
+	val |= (DISABLE_PULLUP_DP | DISABLE_PULLUP_DM
+			| FORCE_PULLDN_DP | DISABLE_PULLDN_DM);
+	writel(val, base + UTMIP_MISC_CFG0);
 
-	ret = false;
-	/* Turn off all terminations except DP pulldown */
-	status1 = utmi_phy_get_dp_dm_status(phy,
-			DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-			FORCE_PULLDN_DP | DISABLE_PULLDN_DM);
+	/*Wait for 20 ms to turn off terminations and stabilize line satus*/
+	msleep(20);
+
+	val = readl(base + USB_PORTSC);
+	status = (USB_PORTSC_LINE_STATE(val) == 0);
 
 	/* Turn off all terminations except for DP pullup */
-	status2 = utmi_phy_get_dp_dm_status(phy,
-			FORCE_PULLUP_DP | DISABLE_PULLUP_DM |
-			DISABLE_PULLDN_DP | DISABLE_PULLDN_DM);
+	val = readl(base + UTMIP_MISC_CFG0);
+	val &= ~MASK_ALL_PULLUP_PULLDOWN;
+	val |= (FORCE_PULLUP_DP | DISABLE_PULLUP_DM
+			| DISABLE_PULLDN_DP | DISABLE_PULLDN_DM);
+	writel(val, base + UTMIP_MISC_CFG0);
 
-	/* Check for NV charger DISABLE all terminations */
-	status3 = utmi_phy_get_dp_dm_status(phy,
-			DISABLE_PULLUP_DP | DISABLE_PULLUP_DM |
-			DISABLE_PULLDN_DP | DISABLE_PULLDN_DM);
+	msleep(20);
 
-	if ((status1 == (USB_PORTSC_LINE_DP_SET | USB_PORTSC_LINE_DM_SET)) &&
-	    (status2 == (USB_PORTSC_LINE_DP_SET | USB_PORTSC_LINE_DM_SET)) &&
-	    (status3 == (USB_PORTSC_LINE_DP_SET | USB_PORTSC_LINE_DM_SET)))
-		ret = true;
+	val = readl(base + USB_PORTSC);
+	if (status & (USB_PORTSC_LINE_STATE(val) == 0x3)) {
+		status = false;
+	} else {
+		status = false;
+
+		/* Check for NV charger DISABLE all terminations */
+		val = readl(base + UTMIP_MISC_CFG0);
+		val &= ~MASK_ALL_PULLUP_PULLDOWN;
+		val |= (DISABLE_PULLUP_DP | DISABLE_PULLUP_DM
+				| DISABLE_PULLDN_DP | DISABLE_PULLDN_DM);
+		writel(val, base + UTMIP_MISC_CFG0);
+
+		val = readl(base + USB_PORTSC);
+		if (USB_PORTSC_LINE_STATE(val) == 0x3)
+			status = true;
+	}
 
 	/* Restore standard termination by hardware. */
-	utmi_phy_set_dp_dm_pull_up_down(phy, 0);
-	return ret;
+	val = readl(base + UTMIP_MISC_CFG0);
+	val &= ~MASK_ALL_PULLUP_PULLDOWN;
+	writel(val, base + UTMIP_MISC_CFG0);
+
+	return status;
 }
 
 static void uhsic_powerup_pmc_wake_detect(struct tegra_usb_phy *phy)
@@ -2409,8 +2288,7 @@ static void uhsic_phy_close(struct tegra_usb_phy *phy)
 static int uhsic_phy_irq(struct tegra_usb_phy *phy)
 {
 	/* check if there is any remote wake event */
-	if (!phy->pdata->unaligned_dma_buf_supported)
-		usb_phy_fence_read(phy);
+	usb_phy_fence_read(phy);
 	if (uhsic_phy_remotewake_detected(phy))
 		DBG("%s: uhsic remote wake detected\n", __func__);
 	return IRQ_HANDLED;

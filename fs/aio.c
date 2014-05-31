@@ -1680,7 +1680,9 @@ long do_io_submit(aio_context_t ctx_id, long nr,
 	struct kioctx *ctx;
 	long ret = 0;
 	int i = 0;
+#if !defined(CONFIG_MACH_ENDEAVORU) && !defined(CONFIG_MACH_X3)
 	struct blk_plug plug;
+#endif
 	struct kiocb_batch batch;
 
 	if (unlikely(nr < 0))
@@ -1700,7 +1702,9 @@ long do_io_submit(aio_context_t ctx_id, long nr,
 
 	kiocb_batch_init(&batch, nr);
 
+#if !defined(CONFIG_MACH_ENDEAVORU) && !defined(CONFIG_MACH_X3)
 	blk_start_plug(&plug);
+#endif
 
 	/*
 	 * AKPM: should this return a partial result if some of the IOs were
@@ -1724,7 +1728,9 @@ long do_io_submit(aio_context_t ctx_id, long nr,
 		if (ret)
 			break;
 	}
+#if !defined(CONFIG_MACH_ENDEAVORU) && !defined(CONFIG_MACH_X3)
 	blk_finish_plug(&plug);
+#endif
 
 	kiocb_batch_free(ctx, &batch);
 	put_ioctx(ctx);

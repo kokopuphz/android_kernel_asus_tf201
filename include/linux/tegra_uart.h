@@ -39,6 +39,12 @@ struct tegra_uart_platform_data {
 	void (*irda_start)(void);
 	void (*irda_shutdown)(void);
 	void (*irda_remove)(void);
+
+#ifdef CONFIG_MACH_ENDEAVORU
+	bool uart_bt;
+	unsigned bt_en;
+	unsigned bt_cts_irq;
+#endif
 };
 
 int tegra_uart_is_tx_empty(struct uart_port *);

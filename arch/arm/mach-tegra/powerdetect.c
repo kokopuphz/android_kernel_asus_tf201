@@ -77,7 +77,9 @@ static inline u32 pmc_readl(unsigned long addr)
 /* Some IO pads does not have power detect cells, but still can/should be
  * turned off when no power - set pwrdet_mask=0 for such pads */
 static struct pwr_detect_cell pwr_detect_cells[] = {
+#if !defined(CONFIG_MACH_ENDEAVORU) && !defined(CONFIG_MACH_X3)
 	POWER_CELL("pwrdet_nand",	(0x1 <<  1), (0x1 <<  1), 0xFFFFFFFF),
+#endif
 	POWER_CELL("pwrdet_uart",	(0x1 <<  2), (0x1 <<  2), 0xFFFFFFFF),
 	POWER_CELL("pwrdet_bb",		(0x1 <<  3), (0x1 <<  3), 0xFFFFFFFF),
 #ifdef	CONFIG_ARCH_TEGRA_2x_SOC
@@ -93,14 +95,20 @@ static struct pwr_detect_cell pwr_detect_cells[] = {
 #ifdef	CONFIG_ARCH_TEGRA_2x_SOC
 	POWER_CELL("pwrdet_sd",			  0, (0x1 <<  8), 0xFFFFFFFF),
 #endif
+#ifndef CONFIG_MACH_ENDEAVORU
 	POWER_CELL("pwrdet_mipi",		  0, (0x1 <<  9), 0xFFFFFFFF),
+#endif
 #ifndef CONFIG_ARCH_TEGRA_2x_SOC
 	POWER_CELL("pwrdet_cam",	(0x1 << 10), (0x1 << 10), 0xFFFFFFFF),
 #ifdef CONFIG_ARCH_TEGRA_3x_SOC
+#if !defined(CONFIG_MACH_ENDEAVORU) && !defined(CONFIG_MACH_X3)
 	POWER_CELL("pwrdet_pex_ctl",	(0x1 << 11), (0x1 << 11), 0xFFFFFFFF),
 #endif
+#endif
 	POWER_CELL("pwrdet_sdmmc1",	(0x1 << 12), (0x1 << 12), 0xFFFFFFFF),
+#ifndef CONFIG_MACH_ENDEAVORU
 	POWER_CELL("pwrdet_sdmmc3",	(0x1 << 13), (0x1 << 13), 0xFFFFFFFF),
+#endif
 	POWER_CELL("pwrdet_sdmmc4",		  0, (0x1 << 14), 0xFFFFFFFF),
 #ifdef CONFIG_ARCH_TEGRA_11x_SOC
 	POWER_CELL("pwrdet_hv",		(0x1 << 15), (0x1 << 15), 0xFFFFFFFF),

@@ -34,6 +34,7 @@
 
 #include <linux/mfd/core.h>
 #include <linux/mfd/tps80031.h>
+#include <linux/reboot.h>
 
 /* interrupt related registers */
 #define TPS80031_INT_STS_A		0xD0
@@ -106,8 +107,8 @@
 #define TPS80031_CFG_INPUT_PUPD3 0xF2
 #define TPS80031_CFG_INPUT_PUPD4 0xF3
 
-#define TPS80031_BBSPOR_CFG	0xE6
-#define TPS80031_BBSPOR_CHG_EN	0x8
+#define CONTROLLER_STAT1	0xE3
+#define VBUS_DET		(1U << 2)
 
 /* Valid Address ranges */
 #define TPS80031_ID0_PMIC_SLAVE_SMPS_DVS	0x55 ... 0x5C
@@ -294,6 +295,10 @@ struct tps80031 {
 	u8			cont_int_en;
 	u8			prev_cont_stat1;
 	struct tps80031_client	tps_clients[TPS_NUM_SLAVES];
+#ifdef CONFIG_PM
+	void (*suspend_work)(void);
+	void (*resume_work)(void);
+#endif
 	struct regmap		*regmap[TPS_NUM_SLAVES];
 };
 
@@ -304,15 +309,6 @@ static struct mfd_cell tps80031_cell[] = {
 	},
 	{
 		.name = "tps80031-rtc",
-	},
-	{
-		.name = "tps80031-gpadc",
-	},
-	{
-		.name = "tps80031-battery-gauge",
-	},
-	{
-		.name = "tps80031-charger",
 	},
 };
 
@@ -484,7 +480,41 @@ int tps80031_get_pmu_version(struct device *dev)
 }
 EXPORT_SYMBOL_GPL(tps80031_get_pmu_version);
 
+#ifdef CONFIG_HTC_POWER_OFF
 static struct tps80031 *tps80031_dev;
+static void tps80031_power_off(void);
+extern void (*arm_pm_restart)(char str, const char *cmd);
+static void tps80031_power_off_or_reboot(void)
+{
+	uint8_t ctrl0;
+	struct tps80031_client *tps = &tps80031_dev->tps_clients[SLAVE_ID2];
+	int ret = 0;
+	ret = tps80031_read(&tps->client->dev, SLAVE_ID2, CONTROLLER_STAT1, &ctrl0);
+	if (ret < 0) {
+		pr_err("%s:read register CONTROLLER_STAT1 fail\n",__func__);
+		return;
+	}
+
+	if (!(ctrl0 & VBUS_DET)) {
+		machine_shutdown();
+		printk("VBUS not detected, shutdown");
+		tps80031_power_off();
+	} else {
+		printk("VBUS detected, do offmode charging");
+
+		/* Disable interrupts first */
+		local_irq_disable();
+		local_fiq_disable();
+
+		machine_shutdown();
+
+		arm_pm_restart('h', "offmode");
+	}
+}
+#endif
+int tps80031_vbus_on = 0;
+EXPORT_SYMBOL_GPL(tps80031_vbus_on);
+
 static void tps80031_power_off(void)
 {
 	struct tps80031_client *tps = &tps80031_dev->tps_clients[SLAVE_ID1];
@@ -518,17 +548,6 @@ static void tps80031_pupd_init(struct tps80031 *tps80031,
 		tps80031_update(tps80031->dev, SLAVE_ID1, pupd->reg,
 				update_value, update_mask);
 	}
-}
-
-static void tps80031_backup_battery_charger_control(struct tps80031 *tps80031,
-						    int enable)
-{
-	if (enable)
-		tps80031_update(tps80031->dev, SLAVE_ID1, TPS80031_BBSPOR_CFG,
-				TPS80031_BBSPOR_CHG_EN, TPS80031_BBSPOR_CHG_EN);
-	else
-		tps80031_update(tps80031->dev, SLAVE_ID1, TPS80031_BBSPOR_CFG,
-				0, TPS80031_BBSPOR_CHG_EN);
 }
 
 static void tps80031_init_ext_control(struct tps80031 *tps80031,
@@ -613,7 +632,7 @@ static int tps80031_gpio_enable(struct gpio_chip *gc, unsigned offset)
 		return ret;
 
 	return tps80031_write(tps80031->dev, SLAVE_ID1,
-		pmc_ext_control_base[offset] + EXT_CONTROL_CFG_TRANS, 0x0);
+		pmc_ext_control_base[offset] + EXT_CONTROL_CFG_TRANS, 0x1);
 }
 
 static void tps80031_gpio_disable(struct gpio_chip *gc, unsigned offset)
@@ -689,6 +708,17 @@ static void tps80031_gpio_init(struct tps80031 *tps80031,
 	ret = gpiochip_add(&tps80031->gpio);
 	if (ret)
 		dev_warn(tps80031->dev, "GPIO registration failed: %d\n", ret);
+}
+
+static int __remove_subdev(struct device *dev, void *unused)
+{
+	platform_device_unregister(to_platform_device(dev));
+	return 0;
+}
+
+static int tps80031_remove_subdevs(struct tps80031 *tps80031)
+{
+	return device_for_each_child(tps80031->dev, NULL, __remove_subdev);
 }
 
 static void tps80031_irq_lock(struct irq_data *data)
@@ -787,6 +817,10 @@ static irqreturn_t tps80031_charge_control_irq(int irq, void *data)
 				"status %d\n", __func__, ret);
 		return IRQ_NONE;
 	}
+	if (org_sts & BIT(2))
+		tps80031_vbus_on = 1;
+	else
+		tps80031_vbus_on = 0;
 
 	/* Get change from last interrupt and mask for interested interrupt
 	 * for charge control interrupt */
@@ -1013,6 +1047,32 @@ static void tps80031_clk32k_init(struct tps80031 *tps80031,
 	}
 }
 
+static int __devinit tps80031_add_subdevs(struct tps80031 *tps80031,
+					  struct tps80031_platform_data *pdata)
+{
+	struct tps80031_subdev_info *subdev;
+	struct platform_device *pdev;
+	int i, ret = 0;
+
+	for (i = 0; i < pdata->num_subdevs; i++) {
+		subdev = &pdata->subdevs[i];
+
+		pdev = platform_device_alloc(subdev->name, subdev->id);
+
+		pdev->dev.parent = tps80031->dev;
+		pdev->dev.platform_data = subdev->platform_data;
+
+		ret = platform_device_add(pdev);
+		if (ret)
+			goto failed;
+	}
+	return 0;
+
+failed:
+	tps80031_remove_subdevs(tps80031);
+	return ret;
+}
+
 #ifdef CONFIG_DEBUG_FS
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
@@ -1076,6 +1136,74 @@ static int dbg_tps_show(struct seq_file *s, void *unused)
 	print_regs("CHARGE Regs",    s, SLAVE_ID2, 0xDA, 0xF5);
 	return 0;
 }
+
+static void printk_regs(const char *header, int sid, int start_offset, int end_offset)
+{
+	struct tps80031 *tps80031 = tps80031_dev;
+	struct tps80031_client *tps;
+	uint8_t reg_val;
+	int i;
+	int ret;
+
+	if (tps80031 == NULL)
+		return;
+	tps = &tps80031->tps_clients[sid];
+
+	pr_info("%s\n", header);
+	pr_info("Addr = 0x%02X Reg 0x%02X ~ 0x%02X\n", tps->client->addr, start_offset, end_offset);
+	for (i = start_offset; i <= end_offset; ++i) {
+		ret = tps80031_read(&tps->client->dev, sid, i, &reg_val);
+		if (ret >= 0)
+			pr_info("%02X", reg_val);
+	}
+	pr_info("\n------------------\n");
+}
+
+int dbg_tps_showk(void)
+{
+	pr_info("TPS80031 Registers\n");
+	pr_info("------------------\n");
+	printk_regs("RTC TIME",       SLAVE_ID1, 0x0, 0x6);
+	printk_regs("RTC ALARM",      SLAVE_ID1, 0x8, 0xD);
+	printk_regs("RTC STATUS",     SLAVE_ID1, 0x10, 0x16);
+	printk_regs("VIO Regs",       SLAVE_ID1, 0x47, 0x49);
+	printk_regs("VIO Regs",       SLAVE_ID0, 0x49, 0x4A);
+	printk_regs("SMPS1 Regs",     SLAVE_ID1, 0x53, 0x54);
+	printk_regs("SMPS1 Regs",     SLAVE_ID0, 0x55, 0x56);
+	printk_regs("SMPS1 Regs",     SLAVE_ID1, 0x57, 0x57);
+	printk_regs("SMPS2 Regs",     SLAVE_ID1, 0x59, 0x5B);
+	printk_regs("SMPS2 Regs",     SLAVE_ID0, 0x5B, 0x5C);
+	printk_regs("SMPS2 Regs",     SLAVE_ID1, 0x5C, 0x5D);
+	printk_regs("SMPS3 Regs",     SLAVE_ID1, 0x65, 0x68);
+	printk_regs("SMPS4 Regs",     SLAVE_ID1, 0x41, 0x44);
+	printk_regs("VANA Regs",      SLAVE_ID1, 0x81, 0x83);
+	printk_regs("VRTC Regs",      SLAVE_ID1, 0xC3, 0xC4);
+	printk_regs("LDO1 Regs",      SLAVE_ID1, 0x9D, 0x9F);
+	printk_regs("LDO2 Regs",      SLAVE_ID1, 0x85, 0x87);
+	printk_regs("LDO3 Regs",      SLAVE_ID1, 0x8D, 0x8F);
+	printk_regs("LDO4 Regs",      SLAVE_ID1, 0x89, 0x8B);
+	printk_regs("LDO5 Regs",      SLAVE_ID1, 0x99, 0x9B);
+	printk_regs("LDO6 Regs",      SLAVE_ID1, 0x91, 0x93);
+	printk_regs("LDO7 Regs",      SLAVE_ID1, 0xA5, 0xA7);
+	printk_regs("LDOUSB Regs",    SLAVE_ID1, 0xA1, 0xA3);
+	printk_regs("LDOLN Regs",     SLAVE_ID1, 0x95, 0x97);
+	printk_regs("REGEN1 Regs",    SLAVE_ID1, 0xAE, 0xAF);
+	printk_regs("REGEN2 Regs",    SLAVE_ID1, 0xB1, 0xB2);
+	printk_regs("SYSEN Regs",     SLAVE_ID1, 0xB4, 0xB5);
+	printk_regs("CLK32KAO Regs",  SLAVE_ID1, 0xBA, 0xBB);
+	printk_regs("CLK32KG Regs",   SLAVE_ID1, 0xBD, 0xBE);
+	printk_regs("CLK32KAUD Regs", SLAVE_ID1, 0xC0, 0xC1);
+	printk_regs("INT Regs",       SLAVE_ID2, 0xD0, 0xD8);
+	printk_regs("PREQ Regs",      SLAVE_ID1, 0xD7, 0xDF);
+	printk_regs("MASK_PH Regs",   SLAVE_ID1, 0x20, 0x21);
+	printk_regs("PMC MISC Regs",  SLAVE_ID1, 0xE0, 0xEF);
+	printk_regs("CONT_STATE",     SLAVE_ID2, 0xE0, 0xE4);
+	printk_regs("VERNUM Regs",    SLAVE_ID3, 0x87, 0x87);
+	printk_regs("EEPROM Regs",    SLAVE_ID3, 0xDF, 0xDF);
+	printk_regs("CHARGE Regs",    SLAVE_ID2, 0xDA, 0xF5);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(dbg_tps_showk);
 
 static int dbg_tps_open(struct inode *inode, struct file *file)
 {
@@ -1239,6 +1367,7 @@ static int __devinit tps80031_i2c_probe(struct i2c_client *client,
 	int jtag_ver;
 	int ep_ver;
 	int i;
+	u8 org_sts;
 
 	if (!pdata) {
 		dev_err(&client->dev, "tps80031 requires platform data\n");
@@ -1272,6 +1401,10 @@ static int __devinit tps80031_i2c_probe(struct i2c_client *client,
 	tps80031->dev = &client->dev;
 	i2c_set_clientdata(client, tps80031);
 	tps80031->chip_info = id->driver_data;
+#ifdef CONFIG_PM
+	tps80031->suspend_work = pdata->suspend_work;
+	tps80031->resume_work = pdata->resume_work;
+#endif
 
 	/* Set up slaves */
 	tps80031->tps_clients[SLAVE_ID0].addr = I2C_ID0_ADDR;
@@ -1323,20 +1456,45 @@ static int __devinit tps80031_i2c_probe(struct i2c_client *client,
 		goto fail_mfd_add;
 	}
 
+	ret = tps80031_add_subdevs(tps80031, pdata);
+	if (ret) {
+		dev_err(&client->dev, "add devices failed: %d\n", ret);
+		goto fail_add_subdev;
+	}
+
 	tps80031_gpio_init(tps80031, pdata);
 
 	tps80031_clk32k_init(tps80031, pdata);
 
 	tps80031_debuginit(tps80031);
 
-	tps80031_backup_battery_charger_control(tps80031, 1);
 
+#ifndef CONFIG_HTC_POWER_OFF
 	if (pdata->use_power_off && !pm_power_off)
 		pm_power_off = tps80031_power_off;
+#else
+	if (pdata->use_power_off && !pm_power_off)
+		pm_power_off = tps80031_power_off_or_reboot;
+#endif
 
 	tps80031_dev = tps80031;
 
+	ret = tps80031_read(tps80031->dev, SLAVE_ID2,
+			TPS80031_CONTROLLER_STAT1, &org_sts);
+	if (ret < 0) {
+		dev_err(tps80031->dev, "%s(): failed to read controller state1 "
+				"status %d\n", __func__, ret);
+		goto fail_add_subdev;
+	}
+	if (org_sts & BIT(2))
+		tps80031_vbus_on = 1;
+	else
+		tps80031_vbus_on = 0;
+
 	return 0;
+
+fail_add_subdev:
+	mfd_remove_devices(tps80031->dev);
 
 fail_mfd_add:
 	if (client->irq)
@@ -1357,9 +1515,12 @@ static int tps80031_i2c_suspend(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct tps80031 *tps80031 = i2c_get_clientdata(client);
+
+	if (!!tps80031->suspend_work)
+		tps80031->suspend_work();
+
 	if (client->irq)
 		disable_irq(client->irq);
-	tps80031_backup_battery_charger_control(tps80031, 0);
 	return 0;
 }
 
@@ -1367,7 +1528,10 @@ static int tps80031_i2c_resume(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct tps80031 *tps80031 = i2c_get_clientdata(client);
-	tps80031_backup_battery_charger_control(tps80031, 1);
+
+	if (!!tps80031->resume_work)
+		tps80031->resume_work();
+
 	if (client->irq)
 		enable_irq(client->irq);
 	return 0;

@@ -2,7 +2,6 @@ GCOV_PROFILE := y
 
 subdir-ccflags-y := -Werror
 
-obj-y                                   += board-pinmux.o
 obj-y                                   += ahb.o
 obj-y                                   += common.o
 obj-y                                   += devices.o
@@ -58,7 +57,8 @@ obj-y                                   += sleep.o
 plus_sec := $(call as-instr,.arch_extension sec,+sec)
 AFLAGS_sleep.o :=-Wa,-march=armv7-a$(plus_sec)
 
-obj-y                                   += tegra_fuse.o
+#EPRJ HACK: Rename tegra_fuse to fuse
+obj-y                                   += fuse.o
 obj-y                                   += kfuse.o
 obj-y                                   += csi.o
 obj-y                                   += tegra_odm_fuses.o
@@ -298,12 +298,16 @@ obj-${CONFIG_MACH_TEGRA_PLUTO}          += panel-l-720p-5.o
 obj-${CONFIG_MACH_TEGRA_PLUTO}          += panel-j-720p-4-7.o
 obj-${CONFIG_MACH_TEGRA_PLUTO}          += panel-s-1080p-5.o
 
+ifneq ($(CONFIG_MACH_ENDEAVORU),y)
 obj-${CONFIG_TEGRA_BB_XMM_POWER}        += baseband-xmm-power.o
 obj-${CONFIG_TEGRA_BB_XMM_POWER2}       += baseband-xmm-power2.o
+endif
 
 obj-${CONFIG_TEGRA_ISOMGR}              += isomgr.o
 
+ifneq ($(CONFIG_MACH_ENDEAVORU),y)
 obj-${CONFIG_TEGRA_NVDUMPER}            += nvdumper.o
+endif
 
 obj-${CONFIG_MACH_ROTH}                 += board-roth.o
 obj-${CONFIG_MACH_ROTH}                 += board-roth-memory.o
@@ -315,4 +319,23 @@ obj-${CONFIG_MACH_ROTH}                 += board-roth-panel.o
 obj-${CONFIG_MACH_ROTH}                 += board-roth-kbc.o
 obj-${CONFIG_MACH_ROTH}                 += board-roth-sensors.o
 obj-${CONFIG_MACH_ROTH}			+= board-roth-fan.o
-obj-${CONFIG_MACH_ROTH}			+= board-roth-leds.o
+
+#
+# EternityProject: Implement our modifications [START]
+#
+
+# EPRJ Special Drivers
+obj-y					+= eprj_memory.o
+
+# EPRJ Generic Drivers
+obj-y					+= eprj_generic/
+
+# For HTC ENR#U
+obj-${CONFIG_MACH_ENDEAVORU}		+= eprj_enru/
+subdir-ccflags-${CONFIG_MACH_ENDEAVORU} += -Iarch/arm/mach-tegra/eprj_enru/include
+
+# For LGE X3
+obj-$(CONFIG_MACH_LGE)			+= eprj_x3/
+subdir-ccflags-$(CONFIG_MACH_X3)	+= -Iarch/arm/mach-tegra/eprj_x3/include
+
+# EternityProject [END]

@@ -808,10 +808,6 @@ enum {
  * @SCAN_SUSPEND: Suspend the scan and go back to operating channel to
  *	send out data
  * @SCAN_RESUME: Resume the scan and scan the next channel
- * @SCAN_ABORT: Abnormally terminate the scan operation, set only when
- *	on the operating channel.
- * @SCAN_SUSPEND_ABORT: Return to the operating channel then
- *	terminate the scan operation.
  */
 enum mac80211_scan_state {
 	SCAN_DECISION,
@@ -819,8 +815,6 @@ enum mac80211_scan_state {
 	SCAN_SEND_PROBE,
 	SCAN_SUSPEND,
 	SCAN_RESUME,
-	SCAN_ABORT,
-	SCAN_SUSPEND_ABORT,
 };
 
 struct ieee80211_local {
@@ -1239,9 +1233,9 @@ void ieee80211_mesh_rx_queued_mgmt(struct ieee80211_sub_if_data *sdata,
 
 /* scan/BSS handling */
 void ieee80211_scan_work(struct work_struct *work);
-int ieee80211_request_internal_scan(struct ieee80211_sub_if_data *sdata,
-				    const u8 *ssid, u8 ssid_len,
-				    struct ieee80211_channel *chan);
+int ieee80211_request_ibss_scan(struct ieee80211_sub_if_data *sdata,
+				const u8 *ssid, u8 ssid_len,
+				struct ieee80211_channel *chan);
 int ieee80211_request_scan(struct ieee80211_sub_if_data *sdata,
 			   struct cfg80211_scan_request *req);
 void ieee80211_scan_cancel(struct ieee80211_local *local);
@@ -1270,10 +1264,8 @@ int ieee80211_request_sched_scan_stop(struct ieee80211_sub_if_data *sdata);
 void ieee80211_sched_scan_stopped_work(struct work_struct *work);
 
 /* off-channel helpers */
-void ieee80211_offchannel_stop_vifs(struct ieee80211_local *local,
-				    bool offchannel_ps_enable);
-void ieee80211_offchannel_return(struct ieee80211_local *local,
-				 bool offchannel_ps_disable);
+void ieee80211_offchannel_stop_vifs(struct ieee80211_local *local);
+void ieee80211_offchannel_return(struct ieee80211_local *local);
 void ieee80211_hw_roc_setup(struct ieee80211_local *local);
 
 /* interface handling */
@@ -1303,6 +1295,8 @@ netdev_tx_t ieee80211_monitor_start_xmit(struct sk_buff *skb,
 					 struct net_device *dev);
 netdev_tx_t ieee80211_subif_start_xmit(struct sk_buff *skb,
 				       struct net_device *dev);
+void ieee80211_purge_tx_queue(struct ieee80211_hw *hw,
+			      struct sk_buff_head *skbs);
 
 /* HT */
 bool ieee80111_cfg_override_disables_ht40(struct ieee80211_sub_if_data *sdata);

@@ -82,5 +82,17 @@ GSYMS
 GTAGS
 
 *.orig
+*.rej
 *~
+
+# EternityProject patch files
+patch1
+patch2
+patch3
+*.diff
+patch-3.*
+
+# EternityProject: wl12xx
+/drivers/net/wireless/wl12xx/version.h
+
 \#*#

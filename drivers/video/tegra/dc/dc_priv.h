@@ -20,20 +20,182 @@
 #ifndef __DRIVERS_VIDEO_TEGRA_DC_DC_PRIV_H
 #define __DRIVERS_VIDEO_TEGRA_DC_DC_PRIV_H
 
-#include "dc_priv_defs.h"
-#ifndef CREATE_TRACE_POINTS
-# include <trace/events/display.h>
+#include <linux/io.h>
+#include <linux/mutex.h>
+#include <linux/wait.h>
+#include <linux/fb.h>
+#include <linux/clk.h>
+#include <linux/completion.h>
+#include <linux/switch.h>
+#include <linux/nvhost.h>
+
+#include <mach/dc.h>
+
+#include <mach/tegra_dc_ext.h>
+#include <mach/clk.h>
+
+#include "dc_reg.h"
+
+
+#define WIN_IS_TILED(win)	((win)->flags & TEGRA_WIN_FLAG_TILED)
+#define WIN_IS_ENABLED(win)	((win)->flags & TEGRA_WIN_FLAG_ENABLED)
+
+#define NEED_UPDATE_EMC_ON_EVERY_FRAME (windows_idle_detection_time == 0)
+
+/* DDR: 8 bytes transfer per clock */
+#define DDR_BW_TO_FREQ(bw) ((bw) / 8)
+
+#if defined(CONFIG_TEGRA_EMC_TO_DDR_CLOCK)
+#define EMC_BW_TO_FREQ(bw) (DDR_BW_TO_FREQ(bw) * CONFIG_TEGRA_EMC_TO_DDR_CLOCK)
+#else
+#define EMC_BW_TO_FREQ(bw) (DDR_BW_TO_FREQ(bw) * 2)
 #endif
-#include <mach/powergate.h>
+
+#ifndef CONFIG_TEGRA_FPGA_PLATFORM
+#define ALL_UF_INT (WIN_A_UF_INT | WIN_B_UF_INT | WIN_C_UF_INT)
+#else
+/* ignore underflows when on simulation and fpga platform */
+#define ALL_UF_INT (0)
+#endif
+
+struct tegra_dc;
+
+struct tegra_dc_blend {
+	unsigned z[DC_N_WINDOWS];
+	unsigned flags[DC_N_WINDOWS];
+};
+
+struct tegra_dc_out_ops {
+	/* initialize output.  dc clocks are not on at this point */
+	int (*init)(struct tegra_dc *dc);
+	/* destroy output.  dc clocks are not on at this point */
+	void (*destroy)(struct tegra_dc *dc);
+	/* detect connected display.  can sleep.*/
+	bool (*detect)(struct tegra_dc *dc);
+	/* enable output.  dc clocks are on at this point */
+	void (*enable)(struct tegra_dc *dc);
+	/* disable output.  dc clocks are on at this point */
+	void (*disable)(struct tegra_dc *dc);
+	/* hold output.  keeps dc clocks on. */
+	void (*hold)(struct tegra_dc *dc);
+	/* release output.  dc clocks may turn off after this. */
+	void (*release)(struct tegra_dc *dc);
+	/* idle routine of output.  dc clocks may turn off after this. */
+	void (*idle)(struct tegra_dc *dc);
+	/* suspend output.  dc clocks are on at this point */
+	void (*suspend)(struct tegra_dc *dc);
+	/* resume output.  dc clocks are on at this point */
+	void (*resume)(struct tegra_dc *dc);
+	/* mode filter. to provide a list of supported modes*/
+	bool (*mode_filter)(const struct tegra_dc *dc,
+			struct fb_videomode *mode);
+	void (*send_cmd)(struct tegra_dc *dc, struct tegra_dsi_cmd *cmd, int n);
+};
+
+struct tegra_dc {
+	struct nvhost_device		*ndev;
+	struct tegra_dc_platform_data	*pdata;
+
+	struct resource			*base_res;
+	void __iomem			*base;
+	int				irq;
+
+	struct clk			*clk;
+	struct clk			*emc_clk;
+	int				emc_clk_rate;
+	int				new_emc_clk_rate;
+	u32				shift_clk_div;
+
+	bool				connected;
+	bool				enabled;
+	bool				suspended;
+
+	struct tegra_dc_out		*out;
+	struct tegra_dc_out_ops		*out_ops;
+	void				*out_data;
+
+	struct tegra_dc_mode		mode;
+
+	struct tegra_dc_win		windows[DC_N_WINDOWS];
+	struct tegra_dc_blend		blend;
+	int				n_windows;
+
+	wait_queue_head_t		wq;
+
+	struct mutex			lock;
+	struct mutex			one_shot_lock;
+	struct mutex			host_lock;
+	struct mutex			vsync_lock;
+	struct resource			*fb_mem;
+	struct tegra_fb_info		*fb;
+
+	struct {
+		u32			id;
+		u32			min;
+		u32			max;
+	} syncpt[DC_N_WINDOWS];
+	u32				vblank_syncpt;
+
+	unsigned long			underflow_mask;
+	struct work_struct		reset_work;
+
+#ifdef CONFIG_SWITCH
+	struct switch_dev		modeset_switch;
+#endif
+
+	struct completion		frame_end_complete;
+
+	struct work_struct		vblank_work;
+	long				vblank_ref_count;
+
+	struct {
+		u64			underflows;
+		u64			underflows_a;
+		u64			underflows_b;
+		u64			underflows_c;
+	} stats;
+
+	struct tegra_dc_ext		*ext;
+
+	struct tegra_dc_feature		*feature;
+
+#ifdef CONFIG_DEBUG_FS
+	struct dentry			*debugdir;
+#endif
+	struct tegra_dc_lut		fb_lut;
+	struct delayed_work		underflow_work;
+	u32				one_shot_delay_ms;
+	struct delayed_work		one_shot_work;
+	bool isyuv_lasttime;
+
+	u32 suspend_status;
+};
+
+#define print_mode_info(dc, mode) do {					\
+	trace_printk("%s:Mode settings: "				\
+			"ref_to_sync: H = %d V = %d, "			\
+			"sync_width: H = %d V = %d, "			\
+			"back_porch: H = %d V = %d, "			\
+			"active: H = %d V = %d, "			\
+			"front_porch: H = %d V = %d, "			\
+			"pclk = %d, stereo mode = %d\n",		\
+			dc->ndev->name,					\
+			mode.h_ref_to_sync, mode.v_ref_to_sync,		\
+			mode.h_sync_width, mode.v_sync_width,		\
+			mode.h_back_porch, mode.v_back_porch,		\
+			mode.h_active, mode.v_active,			\
+			mode.h_front_porch, mode.v_front_porch,		\
+			mode.pclk, mode.stereo_mode);			\
+	} while (0)
 
 static inline void tegra_dc_io_start(struct tegra_dc *dc)
 {
-	nvhost_module_busy_ext(dc->ndev);
+	nvhost_module_busy_ext(nvhost_get_parent(dc->ndev));
 }
 
 static inline void tegra_dc_io_end(struct tegra_dc *dc)
 {
-	nvhost_module_idle_ext(dc->ndev);
+	nvhost_module_idle_ext(nvhost_get_parent(dc->ndev));
 }
 
 static inline unsigned long tegra_dc_readl(struct tegra_dc *dc,
@@ -41,31 +203,24 @@ static inline unsigned long tegra_dc_readl(struct tegra_dc *dc,
 {
 	unsigned long ret;
 
-	BUG_ON(!nvhost_module_powered_ext(dc->ndev));
+	BUG_ON(!nvhost_module_powered_ext(nvhost_get_parent(dc->ndev)));
 	if (!tegra_is_clk_enabled(dc->clk))
 		WARN(1, "DC is clock-gated.\n");
 
 	ret = readl(dc->base + reg * 4);
-	trace_display_readl(dc, ret, dc->base + reg * 4);
+	trace_printk("readl %p=%#08lx\n", dc->base + reg * 4, ret);
 	return ret;
 }
 
 static inline void tegra_dc_writel(struct tegra_dc *dc, unsigned long val,
 				   unsigned long reg)
 {
-	BUG_ON(!nvhost_module_powered_ext(dc->ndev));
+	BUG_ON(!nvhost_module_powered_ext(nvhost_get_parent(dc->ndev)));
 	if (!tegra_is_clk_enabled(dc->clk))
 		WARN(1, "DC is clock-gated.\n");
 
-	trace_display_writel(dc, val, dc->base + reg * 4);
+	trace_printk("writel %p=%#08lx\n", dc->base + reg * 4, val);
 	writel(val, dc->base + reg * 4);
-}
-
-static inline void tegra_dc_power_on(struct tegra_dc *dc)
-{
-	tegra_dc_writel(dc, PW0_ENABLE | PW1_ENABLE | PW2_ENABLE | PW3_ENABLE |
-					PW4_ENABLE | PM0_ENABLE | PM1_ENABLE,
-					DC_CMD_DISPLAY_POWER_CONTROL);
 }
 
 static inline void _tegra_dc_write_table(struct tegra_dc *dc, const u32 *table,
@@ -176,26 +331,21 @@ static inline bool tegra_dc_is_yuv_planar(int fmt)
 	return false;
 }
 
-static inline u32 tegra_dc_unmask_interrupt(struct tegra_dc *dc, u32 int_val)
+static inline void tegra_dc_unmask_interrupt(struct tegra_dc *dc, u32 int_val)
 {
 	u32 val;
 
 	val = tegra_dc_readl(dc, DC_CMD_INT_MASK);
-	tegra_dc_writel(dc, val | int_val, DC_CMD_INT_MASK);
-	return val;
+	val |= int_val;
+	tegra_dc_writel(dc, val, DC_CMD_INT_MASK);
 }
 
-static inline u32 tegra_dc_mask_interrupt(struct tegra_dc *dc, u32 int_val)
+static inline void tegra_dc_mask_interrupt(struct tegra_dc *dc, u32 int_val)
 {
 	u32 val;
 
 	val = tegra_dc_readl(dc, DC_CMD_INT_MASK);
-	tegra_dc_writel(dc, val & ~int_val, DC_CMD_INT_MASK);
-	return val;
-}
-
-static inline void tegra_dc_restore_interrupt(struct tegra_dc *dc, u32 val)
-{
+	val &= ~int_val;
 	tegra_dc_writel(dc, val, DC_CMD_INT_MASK);
 }
 
@@ -207,26 +357,6 @@ static inline unsigned long tegra_dc_clk_get_rate(struct tegra_dc *dc)
 	return dc->mode.pclk;
 #endif
 }
-
-#ifdef CONFIG_ARCH_TEGRA_11x_SOC
-static inline void _tegra_dc_powergate_locked(struct tegra_dc *dc)
-{
-	tegra_powergate_partition(dc->powergate_id);
-	dc->powered = 0;
-}
-
-static inline void _tegra_dc_unpowergate_locked(struct tegra_dc *dc)
-{
-	tegra_unpowergate_partition(dc->powergate_id);
-	dc->powered = 1;
-}
-
-void tegra_dc_powergate_locked(struct tegra_dc *dc);
-void tegra_dc_unpowergate_locked(struct tegra_dc *dc);
-#else
-static inline void tegra_dc_powergate_locked(struct tegra_dc *dc) { }
-static inline void tegra_dc_unpowergate_locked(struct tegra_dc *dc) { }
-#endif
 
 extern struct tegra_dc_out_ops tegra_dc_rgb_ops;
 extern struct tegra_dc_out_ops tegra_dc_hdmi_ops;
@@ -264,15 +394,13 @@ void tegra_dc_clear_bandwidth(struct tegra_dc *dc);
 void tegra_dc_program_bandwidth(struct tegra_dc *dc, bool use_new);
 int tegra_dc_set_dynamic_emc(struct tegra_dc_win *windows[], int n);
 
-/* defined in mode.c, used in dc.c and window.c */
+/* defined in mode.c, used in dc.c */
 int tegra_dc_program_mode(struct tegra_dc *dc, struct tegra_dc_mode *mode);
 int tegra_dc_calc_refresh(const struct tegra_dc_mode *m);
-int tegra_dc_update_mode(struct tegra_dc *dc);
 
-/* defined in clock.c, used in dc.c, rgb.c, dsi.c and hdmi.c */
+/* defined in clock.c, used in dc.c, dsi.c and hdmi.c */
 void tegra_dc_setup_clk(struct tegra_dc *dc, struct clk *clk);
 unsigned long tegra_dc_pclk_round_rate(struct tegra_dc *dc, int pclk);
-unsigned long tegra_dc_pclk_predict_rate(struct clk *parent, int pclk);
 
 /* defined in lut.c, used in dc.c */
 void tegra_dc_init_lut_defaults(struct tegra_dc_lut *lut);
@@ -284,11 +412,4 @@ void tegra_dc_set_csc(struct tegra_dc *dc, struct tegra_dc_csc *csc);
 
 /* defined in window.c, used in dc.c */
 void tegra_dc_trigger_windows(struct tegra_dc *dc);
-
-void tegra_dc_set_color_control(struct tegra_dc *dc);
-#ifdef CONFIG_TEGRA_DC_CMU
-void tegra_dc_cmu_enable(struct tegra_dc *dc, bool cmu_enable);
-int tegra_dc_update_cmu(struct tegra_dc *dc, struct tegra_dc_cmu *cmu);
-#endif
-
 #endif

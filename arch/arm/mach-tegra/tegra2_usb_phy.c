@@ -28,18 +28,15 @@
 #include <linux/clk.h>
 #include <linux/regulator/consumer.h>
 #include <linux/platform_data/tegra_usb.h>
-
-#include <asm/mach-types.h>
-
 #include <mach/clk.h>
 #include <mach/iomap.h>
 #include <mach/pinmux.h>
-#include <mach/pinmux-tegra20.h>
+#include <asm/mach-types.h>
 #include <mach/usb_phy.h>
-
 #include "tegra_usb_phy.h"
 #include "gpio-names.h"
 #include "fuse.h"
+
 
 #define USB_USBCMD		0x140
 #define   USB_USBCMD_RS		(1 << 0)
@@ -610,7 +607,7 @@ static int utmi_phy_irq(struct tegra_usb_phy *phy)
 	DBG("%s(%d) inst:[%d]\n", __func__, __LINE__, phy->inst);
 
 	usb_phy_fence_read(phy);
-	if (phy->hot_plug) {
+	if (phy->pdata->u_data.host.hot_plug) {
 		val = readl(base + USB_SUSP_CTRL);
 		if ((val  & USB_PHY_CLK_VALID_INT_STS)) {
 			val &= ~USB_PHY_CLK_VALID_INT_ENB |
@@ -637,14 +634,6 @@ static int utmi_phy_irq(struct tegra_usb_phy *phy)
 	return IRQ_HANDLED;
 }
 
-static int phy_post_suspend(struct tegra_usb_phy *phy)
-{
-
-	DBG("%s(%d) inst:[%d]\n", __func__, __LINE__, phy->inst);
-	/* Need a 4ms delay for controller to suspend */
-	mdelay(4);
-	return 0;
-}
 
 static int utmi_phy_post_resume(struct tegra_usb_phy *phy)
 {
@@ -697,7 +686,7 @@ static int utmi_phy_power_off(struct tegra_usb_phy *phy)
 		writel(val, base + UTMIP_BAT_CHRG_CFG0);
 	}
 
-	if (!phy->hot_plug) {
+	if (!phy->pdata->u_data.host.hot_plug) {
 		val = readl(base + UTMIP_XCVR_UHSIC_HSRX_CFG0);
 		val |= (UTMIP_FORCE_PD_POWERDOWN | UTMIP_FORCE_PD2_POWERDOWN |
 			 UTMIP_FORCE_PDZI_POWERDOWN);
@@ -718,7 +707,7 @@ static int utmi_phy_power_off(struct tegra_usb_phy *phy)
 	phy->port_speed = (readl(base + USB_PORTSC) >> 26) &
 			USB_PORTSC_PSPD_MASK;
 
-	if (phy->hot_plug) {
+	if (phy->pdata->u_data.host.hot_plug) {
 		bool enable_hotplug = true;
 		/* if it is OTG port then make sure to enable hot-plug feature
 		   only if host adaptor is connected, i.e id is low */
@@ -950,10 +939,6 @@ static int utmi_phy_resume(struct tegra_usb_phy *phy)
 
 	DBG("%s(%d) inst:[%d]\n", __func__, __LINE__, phy->inst);
 	if (phy->pdata->op_mode == TEGRA_USB_OPMODE_HOST) {
-		if (readl(base + USB_ASYNCLISTADDR) &&
-			!phy->pdata->u_data.host.power_off_on_suspend)
-			return 0;
-
 		if (phy->port_speed < USB_PHY_PORT_SPEED_UNKNOWN) {
 			utmi_phy_restore_start(phy);
 			usb_phy_bringup_host_controller(phy);
@@ -2020,7 +2005,6 @@ static struct tegra_usb_phy_ops utmi_phy_ops = {
 	.resume	= utmi_phy_resume,
 	.post_resume	= utmi_phy_post_resume,
 	.charger_detect = utmi_phy_charger_detect,
-	.post_suspend   = phy_post_suspend,
 };
 
 static struct tegra_usb_phy_ops uhsic_phy_ops = {
@@ -2033,7 +2017,6 @@ static struct tegra_usb_phy_ops uhsic_phy_ops = {
 	.post_resume	= uhsic_phy_post_resume,
 	.port_power	= uhsic_phy_bus_port_power,
 	.bus_reset	= uhsic_phy_bus_reset,
-	.post_suspend   = phy_post_suspend,
 };
 
 static struct tegra_usb_phy_ops ulpi_link_phy_ops = {
@@ -2043,7 +2026,6 @@ static struct tegra_usb_phy_ops ulpi_link_phy_ops = {
 	.power_on	= ulpi_link_phy_power_on,
 	.power_off	= ulpi_link_phy_power_off,
 	.resume		= ulpi_link_phy_resume,
-	.post_suspend   = phy_post_suspend,
 	.pre_resume	= ulpi_link_phy_pre_resume,
 };
 
@@ -2055,7 +2037,6 @@ static struct tegra_usb_phy_ops ulpi_null_phy_ops = {
 	.power_off	= ulpi_null_phy_power_off,
 	.pre_resume = ulpi_null_phy_pre_resume,
 	.resume = ulpi_null_phy_resume,
-	.post_suspend   = phy_post_suspend,
 	.post_resume = ulpi_null_phy_post_resume,
 };
 

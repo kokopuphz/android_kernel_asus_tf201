@@ -29,8 +29,6 @@
  */
 static int mmc_prep_request(struct request_queue *q, struct request *req)
 {
-	struct mmc_queue *mq = q->queuedata;
-
 	/*
 	 * We only like normal block requests and discards.
 	 */
@@ -38,9 +36,6 @@ static int mmc_prep_request(struct request_queue *q, struct request *req)
 		blk_dump_rq_flags(req, "MMC bad request");
 		return BLKPREP_KILL;
 	}
-
-	if (mq && mmc_card_removed(mq->card))
-		return BLKPREP_KILL;
 
 	req->cmd_flags |= REQ_DONTPREP;
 
@@ -119,7 +114,7 @@ static void mmc_request(struct request_queue *q)
 		wake_up_process(mq->thread);
 }
 
-static struct scatterlist *mmc_alloc_sg(int sg_len, int *err)
+struct scatterlist *mmc_alloc_sg(int sg_len, int *err)
 {
 	struct scatterlist *sg;
 
@@ -145,13 +140,13 @@ static void mmc_queue_setup_discard(struct request_queue *q,
 
 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
 	q->limits.max_discard_sectors = max_discard;
-	if (card->erased_byte == 0 && !mmc_can_discard(card))
+	if (card->erased_byte == 0)
 		q->limits.discard_zeroes_data = 1;
 	q->limits.discard_granularity = card->pref_erase << 9;
 	/* granularity must not be greater than max. discard */
 	if (card->pref_erase > max_discard)
 		q->limits.discard_granularity = 0;
-	if (mmc_can_secure_erase_trim(card) || mmc_can_sanitize(card))
+	if (mmc_can_secure_erase_trim(card))
 		queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD, q);
 }
 
@@ -183,8 +178,6 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 
 	memset(&mq->mqrq_cur, 0, sizeof(mq->mqrq_cur));
 	memset(&mq->mqrq_prev, 0, sizeof(mq->mqrq_prev));
-	INIT_LIST_HEAD(&mqrq_cur->packed_list);
-	INIT_LIST_HEAD(&mqrq_prev->packed_list);
 	mq->mqrq_cur = mqrq_cur;
 	mq->mqrq_prev = mqrq_prev;
 	mq->queue->queuedata = mq;
@@ -210,13 +203,13 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 		if (bouncesz > 512) {
 			mqrq_cur->bounce_buf = kmalloc(bouncesz, GFP_KERNEL);
 			if (!mqrq_cur->bounce_buf) {
-				pr_warning("%s: unable to "
+				printk(KERN_WARNING "%s: unable to "
 					"allocate bounce cur buffer\n",
 					mmc_card_name(card));
 			}
 			mqrq_prev->bounce_buf = kmalloc(bouncesz, GFP_KERNEL);
 			if (!mqrq_prev->bounce_buf) {
-				pr_warning("%s: unable to "
+				printk(KERN_WARNING "%s: unable to "
 					"allocate bounce prev buffer\n",
 					mmc_card_name(card));
 				kfree(mqrq_cur->bounce_buf);
@@ -385,40 +378,6 @@ void mmc_queue_resume(struct mmc_queue *mq)
 	}
 }
 
-static unsigned int mmc_queue_packed_map_sg(struct mmc_queue *mq,
-				struct mmc_queue_req *mqrq,
-				struct scatterlist *sg)
-{
-	struct scatterlist *__sg;
-	unsigned int sg_len = 0;
-	struct request *req;
-	enum mmc_packed_cmd cmd;
-
-	cmd = mqrq->packed_cmd;
-
-	if (cmd == MMC_PACKED_WR_HDR || cmd == MMC_PACKED_WRITE) {
-		__sg = sg;
-		sg_set_buf(__sg, mqrq->packed_cmd_hdr,
-				sizeof(mqrq->packed_cmd_hdr));
-		sg_len++;
-		if (cmd == MMC_PACKED_WR_HDR) {
-			sg_mark_end(__sg);
-			return sg_len;
-		}
-		__sg->page_link &= ~0x02;
-	}
-
-	__sg = sg + sg_len;
-	list_for_each_entry(req, &mqrq->packed_list, queuelist) {
-		sg_len += blk_rq_map_sg(mq->queue, req, __sg);
-		__sg = sg + (sg_len - 1);
-		(__sg++)->page_link &= ~0x02;
-	}
-	sg_mark_end(sg + (sg_len - 1));
-	return sg_len;
-}
-
-
 /*
  * Prepare the sg list(s) to be handed of to the host driver
  */
@@ -429,20 +388,12 @@ unsigned int mmc_queue_map_sg(struct mmc_queue *mq, struct mmc_queue_req *mqrq)
 	struct scatterlist *sg;
 	int i;
 
-	if (!mqrq->bounce_buf) {
-		if (!list_empty(&mqrq->packed_list))
-			return mmc_queue_packed_map_sg(mq, mqrq, mqrq->sg);
-		else
-			return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
-	}
-
+	if (!mqrq->bounce_buf)
+		return blk_rq_map_sg(mq->queue, mqrq->req, mqrq->sg);
 
 	BUG_ON(!mqrq->bounce_sg);
 
-	if (!list_empty(&mqrq->packed_list))
-		sg_len = mmc_queue_packed_map_sg(mq, mqrq, mqrq->bounce_sg);
-	else
-		sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
+	sg_len = blk_rq_map_sg(mq->queue, mqrq->req, mqrq->bounce_sg);
 
 	mqrq->bounce_sg_len = sg_len;
 

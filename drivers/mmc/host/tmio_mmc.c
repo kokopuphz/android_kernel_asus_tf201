@@ -88,8 +88,8 @@ static int __devinit tmio_mmc_probe(struct platform_device *pdev)
 	if (ret)
 		goto cell_disable;
 
-	ret = request_irq(irq, tmio_mmc_irq, IRQF_TRIGGER_FALLING,
-				dev_name(&pdev->dev), host);
+	ret = request_irq(irq, tmio_mmc_irq, IRQF_DISABLED |
+			  IRQF_TRIGGER_FALLING, dev_name(&pdev->dev), host);
 	if (ret)
 		goto host_remove;
 
@@ -138,7 +138,19 @@ static struct platform_driver tmio_mmc_driver = {
 	.resume = tmio_mmc_resume,
 };
 
-module_platform_driver(tmio_mmc_driver);
+
+static int __init tmio_mmc_init(void)
+{
+	return platform_driver_register(&tmio_mmc_driver);
+}
+
+static void __exit tmio_mmc_exit(void)
+{
+	platform_driver_unregister(&tmio_mmc_driver);
+}
+
+module_init(tmio_mmc_init);
+module_exit(tmio_mmc_exit);
 
 MODULE_DESCRIPTION("Toshiba TMIO SD/MMC driver");
 MODULE_AUTHOR("Ian Molton <spyro@f2s.com>");

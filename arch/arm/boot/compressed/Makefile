@@ -5,6 +5,7 @@
 #
 
 OBJS		=
+plus_sec := $(call as-instr,.arch_extension sec,+sec)
 
 # Ensure that MMCIF loader code appears early in the image
 # to minimise that number of bocks that have to be read in
@@ -93,6 +94,7 @@ suffix_$(CONFIG_KERNEL_GZIP) = gzip
 suffix_$(CONFIG_KERNEL_LZO)  = lzo
 suffix_$(CONFIG_KERNEL_LZMA) = lzma
 suffix_$(CONFIG_KERNEL_XZ)   = xzkern
+suffix_$(CONFIG_KERNEL_LZ4)  = lz4
 
 # Borrowed libfdt files for the ATAG compatibility mode
 
@@ -117,7 +119,7 @@ targets       := vmlinux vmlinux.lds \
 		 font.o font.c head.o misc.o $(OBJS)
 
 # Make sure files are removed during clean
-extra-y       += piggy.gzip piggy.lzo piggy.lzma piggy.xzkern \
+extra-y       += piggy.gzip piggy.lzo piggy.lzma piggy.xzkern piggy.lz4 \
 		 lib1funcs.S ashldi3.S $(libfdt) $(libfdt_hdrs)
 
 ifeq ($(CONFIG_FUNCTION_TRACER),y)
@@ -126,7 +128,8 @@ KBUILD_CFLAGS = $(subst -pg, , $(ORIG_CFLAGS))
 endif
 
 ccflags-y := -fpic -fno-builtin -I$(obj)
-asflags-y := -Wa,-march=all
+#asflags-y := -Wa,-march=all
+asflags-y := -Wa,-march=armv7-a$(plus_sec)
 
 # Supply kernel BSS size to the decompressor via a linker symbol.
 KBSS_SZ = $(shell $(CROSS_COMPILE)size $(obj)/../../../../vmlinux | \
@@ -174,13 +177,14 @@ bad_syms=$$($(CROSS_COMPILE)nm $@ | sed -n 's/^.\{8\} [bc] \(.*\)/\1/p') && \
     echo "$$bad_syms" >&2; rm -f $@; false )
 
 check_for_multiple_zreladdr = \
-if [ $(words $(ZRELADDR)) -gt 1 -a "$(CONFIG_AUTO_ZRELADDR)" = "" ]; then \
+if [ $(words $(ZRELADDR)) -gt 1 -a "$(CONFIG_AUTO_ZRELADDR)" == "" ]; then \
 	echo 'multiple zreladdrs: $(ZRELADDR)'; \
 	echo 'This needs CONFIG_AUTO_ZRELADDR to be set'; \
 	false; \
 fi
 
-$(obj)/vmlinux: $(obj)/vmlinux.lds $(obj)/$(HEAD) $(obj)/piggy.$(suffix_y).o \
+$(obj)/vmlinux: $(obj)/vmlinux.lds $(obj)/$(HEAD) $(obj)/misc.o $(obj)/decompress.o \
+		$(obj)/piggy.$(suffix_y).o \
 		$(addprefix $(obj)/, $(OBJS)) $(lib1funcs) $(ashldi3) FORCE
 	@$(check_for_multiple_zreladdr)
 	$(call if_changed,ld)

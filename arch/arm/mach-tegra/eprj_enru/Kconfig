@@ -1,0 +1,129 @@
+config HTC_PROJECT
+       bool "HTC Project"
+       select HTC_DEBUG_FILE_NODE
+       select WATCHDOG
+       select TEGRA_WATCHDOG
+       select TEGRA_WATCHDOG_ENABLE_ON_PROBE
+       select BOOTPARAM_SOFTLOCKUP_PANIC
+       select ANDROID_RAM_CONSOLE_APPEND_PMIC_STATUS_BITS
+       select DEBUG_MUTEXES
+       select HTC_POWER_OFF
+       select DEBUG_CREDENTIALS
+       help
+         HTC Project
+
+config MACH_ENDEAVORU
+       bool "ENDEAVORU board"
+       depends on ARCH_TEGRA_3x_SOC
+       depends on HTC_PROJECT
+       select MACH_HAS_SND_SOC_TEGRA_MAX98088 if SND_SOC
+       select MACH_HAS_SND_SOC_TEGRA_TLV320AIC326X if SND_SOC
+       select TEGRA_SLOW_CSITE
+       select VIDEO_CHANGE_IN_AD5823
+       select RAWCHIP_ENABLE
+       select TEGRA_CPU_AP33
+       help
+         Support for HTC Endeavor#U platform
+
+config HTC_BATT_CORE
+	depends on POWER_SUPPLY
+	bool "HTC battery core driver"
+
+config BATTERY_TPS80032
+	bool "HTC battery driver for tps80032"
+	depends on HTC_BATT_CORE && ADC_TPS80032 && VSYS_ALARM_TPS80032
+
+config HTC_POWER_OFF
+	bool "HTC Power Off"
+	help
+          Switch power off to reboot if cable attached
+
+config EPRJ_ENRU_BASEBAND
+	bool "Intel XMM6260 Baseband support"
+	help
+	  Enables the Intel XMM6260 Flashless modem
+	  on the HTC Endeavor#U platform
+
+config HTC_SIMHOTSWAP
+	bool "Enable sim hotswap driver for sim detect"
+	default n
+	help
+          Enables sim hotswap driver for sim detect.
+
+config HTC_HEADSET_MGR
+	tristate "HTC headset manager driver"
+	default n
+	help
+	  Provides support of HTC headset manager.
+
+config HTC_HEADSET_H2W
+	tristate "HTC 2 Wire headset driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC 2 Wire headset.
+
+config HTC_HEADSET_GPIO
+	tristate "HTC GPIO headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC GPIO headset detection.
+
+config HTC_HEADSET_MICROP
+	tristate "HTC Micro-P headset detection driver"
+	depends on HTC_HEADSET_MGR && MICROP_COMMON
+	default n
+	help
+	  Provides support of HTC Micro-P headset detection.
+
+config HTC_HEADSET_PMIC
+	tristate "HTC PMIC headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC PMIC headset detection.
+
+config HTC_HEADSET_MISC
+	tristate "HTC MISC headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC MISC headset detection.
+
+config HTC_HEADSET_8X60
+	tristate "HTC 8X60 headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC 8X60 headset detection.
+
+config HTC_HEADSET_ONE_WIRE
+	tristate "HTC 1-wire headset detection driver"
+	depends on HTC_HEADSET_MGR
+	default n
+	help
+	  Provides support of HTC 1-wire headset detection.
+
+config RAWCHIP_ENABLE
+	bool "Enable rawchip driver"
+	default n
+
+config RAWCHIP_ENABLE_FRONT
+	bool "Enable rawchip driver for front camera"
+	default n
+
+config HTC_USB_NOTIFIER
+	tristate "HTC usb notifier register"
+	default y
+	help
+	  If usb status are change, a usb notifier will callback to
+	  registered function.
+
+config SENSE_4_PLUS
+	depends on MACH_ENDEAVORU
+	bool "SENSE 4 PLUS"
+	help
+	  Support for SENSE 4 PLUS.
+
+source "arch/arm/mach-tegra/eprj_enru/drivers/Kconfig"

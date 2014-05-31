@@ -1663,14 +1663,14 @@ tegra_xhci_padctl_portmap_and_caps(struct tegra_xhci_hcd *tegra)
 	reg = readl(tegra->padctl_base + USB2_OTG_PAD0_CTL_0_0);
 	reg &= xusb_padctl->otg_pad0_ctl0;
 	reg |= xusb_padctl->hs_slew;
-	reg &= ~(0x83f << 0);
+	reg &= ~(0x3f << 0);
 	reg |= xusb_padctl->hs_curr_level;
 	writel(reg, tegra->padctl_base + USB2_OTG_PAD0_CTL_0_0);
 
 	reg = readl(tegra->padctl_base + USB2_OTG_PAD1_CTL_0_0);
 	reg &= xusb_padctl->otg_pad1_ctl0;
 	reg |= xusb_padctl->hs_slew;
-	reg &= ~(0x83f << 0);
+	reg &= ~(0x3f << 0);
 	reg |= xusb_padctl->hs_curr_level;
 	writel(reg, tegra->padctl_base + USB2_OTG_PAD1_CTL_0_0);
 
@@ -2368,12 +2368,6 @@ static irqreturn_t tegra_xhci_padctl_irq(int irq, void *ptrdev)
 		writel(elpg_program0 | USB2_HSIC_PORT1_WAKEUP_EVENT,
 				tegra->padctl_base + ELPG_PROGRAM_0);
 	}
-
-	if (tegra->ss_wake_event || tegra->hs_wake_event) {
-		tegra_xhci_ss_wake_on_interrupts(tegra, false);
-		tegra_xhci_hs_wake_on_interrupts(tegra, false);
-	}
-
 	if (tegra->ss_wake_event) {
 		if (tegra->ss_pwr_gated && !tegra->host_pwr_gated) {
 			xhci_dbg(xhci, "[%s] schedule ss_elpg_exit_work\n",

@@ -448,7 +448,6 @@ static struct tegra_usb_platform_data tegra_udc_pdata = {
 	.port_otg = true,
 	.has_hostpc = true,
 	.phy_intf = TEGRA_USB_PHY_INTF_UTMI,
-	.unaligned_dma_buf_supported = false,
 	.op_mode = TEGRA_USB_OPMODE_DEVICE,
 	.u_data.dev = {
 		.vbus_pmu_irq = 0,
@@ -551,14 +550,14 @@ static struct tegra_xusb_pad_data xusb_padctl_data = {
 	.port_cap = 0x10,
 	.snps_oc_map = 0x1fc,
 	.usb2_oc_map = 0x2f,
-	.ss_port_map = 0x2,
+	.ss_port_map = 0x1,
 	.oc_det = 0xb000,
 	.rx_wander = 0xf0,
 	.rx_eq = 0x307000,
 	.cdr_cntl = 0x26000000,
 	.dfe_cntl = 0x002008EE,
 	.otg_pad0_ctl0 = 0xffffffff,
-	.hs_slew = 0xc0,
+	.hs_slew = 0x30,
 	.otg_pad0_ctl1 = 0x0,
 	.otg_pad1_ctl0 = 0xffc7ffff,
 	.otg_pad1_ctl1 = 0x7,
@@ -661,9 +660,8 @@ static void dalmore_modem_init(void)
 	int usb_port_owner_info = tegra_get_usb_port_owner_info();
 	switch (modem_id) {
 	case TEGRA_BB_NEMO: /* on board i500 HSIC */
-		if (!(usb_port_owner_info & HSIC1_PORT_OWNER_XUSB)) {
+		if (!(usb_port_owner_info & HSIC1_PORT_OWNER_XUSB))
 			platform_device_register(&icera_nemo_device);
-		}
 		break;
 	}
 }
@@ -811,7 +809,7 @@ static void __init tegra_dalmore_init(void)
 	dalmore_edp_init();
 	dalmore_touch_init();
 	if (board_info.board_id == BOARD_E1582)
-		roth_panel_init(board_info.board_id);
+		roth_panel_init();
 	else
 		dalmore_panel_init();
 	dalmore_kbc_init();

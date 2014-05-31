@@ -7,7 +7,7 @@
  *	Colin Cross <ccross@google.com>
  *	Based on arch/arm/plat-omap/cpu-omap.c, (C) 2005 Nokia Corporation
  *
- * Copyright (C) 2010-2014 NVIDIA CORPORATION. All rights reserved.
+ * Copyright (C) 2010-2012 NVIDIA CORPORATION. All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -37,6 +37,7 @@
 
 #include <mach/clk.h>
 #include <mach/edp.h>
+#include <mach/eternityproject.h>
 
 #include "clock.h"
 #include "cpu-tegra.h"
@@ -53,7 +54,9 @@ static unsigned long policy_max_speed[CONFIG_NR_CPUS];
 static unsigned long target_cpu_speed[CONFIG_NR_CPUS];
 static DEFINE_MUTEX(tegra_cpu_lock);
 static bool is_suspended;
+#ifndef CONFIG_EPRJ_CPUMANAGER
 static int suspend_index;
+#endif
 static unsigned int volt_capped_speed;
 
 
@@ -68,7 +71,7 @@ static int force_policy_max_set(const char *arg, const struct kernel_param *kp)
 
 	ret = param_set_bool(arg, kp);
 	if ((ret == 0) && (old_policy != force_policy_max))
-		tegra_cpu_set_speed_cap_locked(NULL);
+		tegra_cpu_set_speed_cap(NULL);
 
 	mutex_unlock(&tegra_cpu_lock);
 	return ret;
@@ -101,7 +104,7 @@ static inline void _cpu_user_cap_set_locked(void)
 		cpu_user_cap = freq_table[i].frequency;
 	}
 #endif
-	tegra_cpu_set_speed_cap_locked(NULL);
+	tegra_cpu_set_speed_cap(NULL);
 }
 
 void tegra_cpu_user_cap_set(unsigned int speed_khz)
@@ -214,11 +217,10 @@ static unsigned int edp_predict_limit(unsigned int cpus)
 	return limit;
 }
 
-/* Must be called while holding cpu_tegra_lock */
 static void edp_update_limit(void)
 {
 	unsigned int limit = edp_predict_limit(cpumask_weight(&edp_cpumask));
-	BUG_ON(!mutex_is_locked(&tegra_cpu_lock));
+
 #ifdef CONFIG_TEGRA_EDP_EXACT_FREQ
 	edp_limit = limit;
 #else
@@ -235,7 +237,7 @@ static void edp_update_limit(void)
 
 static unsigned int edp_governor_speed(unsigned int requested_speed)
 {
-	if ((!edp_limit) || (requested_speed <= edp_limit))
+	if ((!edp_limit) || (requested_speed <= edp_limit) || eprj_fryme)
 		return requested_speed;
 	else
 		return edp_limit;
@@ -266,7 +268,7 @@ int tegra_edp_set_cur_state(struct thermal_cooling_device *cdev,
 	tegra_cpu_dvfs_alter(edp_thermal_index, &edp_cpumask, true, 0);
 	if (target_cpu_speed[0]) {
 		edp_update_limit();
-		tegra_cpu_set_speed_cap_locked(NULL);
+		tegra_cpu_set_speed_cap(NULL);
 	}
 	tegra_cpu_dvfs_alter(edp_thermal_index, &edp_cpumask, false, 0);
 	mutex_unlock(&tegra_cpu_lock);
@@ -302,7 +304,7 @@ int tegra_system_edp_alarm(bool alarm)
 	   or alarm is canceled */
 	if (target_cpu_speed[0]) {
 		edp_update_limit();
-		ret = tegra_cpu_set_speed_cap_locked(NULL);
+		ret = tegra_cpu_set_speed_cap(NULL);
 	}
 	if (!ret || !alarm)
 		tegra_edp_throttle_cpu_now(0);
@@ -362,7 +364,7 @@ static int tegra_cpu_edp_notify(
 		cpu_speed = tegra_getspeed(0);
 		new_speed = edp_governor_speed(cpu_speed);
 		if (new_speed < cpu_speed) {
-			ret = tegra_cpu_set_speed_cap_locked(NULL);
+			ret = tegra_cpu_set_speed_cap(NULL);
 			printk(KERN_DEBUG "cpu-tegra:%sforce EDP limit %u kHz"
 				"\n", ret ? " failed to " : " ", new_speed);
 		}
@@ -381,7 +383,7 @@ static int tegra_cpu_edp_notify(
 		tegra_cpu_dvfs_alter(
 			edp_thermal_index, &edp_cpumask, true, event);
 		edp_update_limit();
-		tegra_cpu_set_speed_cap_locked(NULL);
+		tegra_cpu_set_speed_cap(NULL);
 		mutex_unlock(&tegra_cpu_lock);
 		break;
 	}
@@ -618,7 +620,7 @@ void tegra_cpu_set_volt_cap(unsigned int cap)
 	mutex_lock(&tegra_cpu_lock);
 	if (cap != volt_capped_speed) {
 		volt_capped_speed = cap;
-		tegra_cpu_set_speed_cap_locked(NULL);
+		tegra_cpu_set_speed_cap(NULL);
 	}
 	mutex_unlock(&tegra_cpu_lock);
 	if (cap)
@@ -634,12 +636,11 @@ static unsigned int volt_cap_speed(unsigned int requested_speed)
 	return requested_speed;
 }
 
-/* Must be called with tegra_cpu_lock held */
-int tegra_cpu_set_speed_cap_locked(unsigned int *speed_cap)
+int tegra_cpu_set_speed_cap(unsigned int *speed_cap)
 {
 	int ret = 0;
 	unsigned int new_speed = tegra_cpu_highest_speed();
-	BUG_ON(!mutex_is_locked(&tegra_cpu_lock));
+
 #ifdef CONFIG_TEGRA_EDP_LIMITS
 	edp_update_limit();
 #endif
@@ -656,19 +657,13 @@ int tegra_cpu_set_speed_cap_locked(unsigned int *speed_cap)
 
 	ret = tegra_update_cpu_speed(new_speed);
 	if (ret == 0)
-		tegra_auto_hotplug_governor(new_speed, false);
+		tegra_auto_hotplug_governor(new_speed
+#ifndef CONFIG_EPRJ_CPUMANAGER
+						,false
+#endif
+						);
 	return ret;
 }
-
-int tegra_cpu_set_speed_cap(unsigned int *speed_cap)
-{
-	int ret;
-	mutex_lock(&tegra_cpu_lock);
-	ret = tegra_cpu_set_speed_cap_locked(speed_cap);
-	mutex_unlock(&tegra_cpu_lock);
-	return ret;
-}
-
 
 int tegra_suspended_target(unsigned int target_freq)
 {
@@ -703,7 +698,7 @@ static int tegra_target(struct cpufreq_policy *policy,
 	freq = freq_table[idx].frequency;
 
 	target_cpu_speed[policy->cpu] = freq;
-	ret = tegra_cpu_set_speed_cap_locked(&new_speed);
+	ret = tegra_cpu_set_speed_cap(&new_speed);
 _out:
 	mutex_unlock(&tegra_cpu_lock);
 
@@ -714,25 +709,50 @@ _out:
 static int tegra_pm_notify(struct notifier_block *nb, unsigned long event,
 	void *dummy)
 {
+	int retval = NOTIFY_OK;
+
 	mutex_lock(&tegra_cpu_lock);
 	if (event == PM_SUSPEND_PREPARE) {
+#ifdef CONFIG_EPRJ_CPUMANAGER
+		pr_info("Tegra cpufreq suspend: entering\n");
+		switch (tegra_auto_hotplug_suspend(true)) {
+			/* Success. */
+			case 0:
+				break;
+
+			/* Otherwise, we failed. We have to block the sleep
+			   so we won't sleep to death! */
+			case -EBUSY:
+			default:
+				retval = notifier_from_errno(-EBUSY);
+				goto out;
+		}
+
+		is_suspended = true;
+#else
 		is_suspended = true;
 		pr_info("Tegra cpufreq suspend: setting frequency to %d kHz\n",
 			freq_table[suspend_index].frequency);
 		tegra_update_cpu_speed(freq_table[suspend_index].frequency);
 		tegra_auto_hotplug_governor(
 			freq_table[suspend_index].frequency, true);
+#endif
+
 	} else if (event == PM_POST_SUSPEND) {
 		unsigned int freq;
 		is_suspended = false;
 		tegra_cpu_edp_init(true);
-		tegra_cpu_set_speed_cap_locked(&freq);
+		tegra_cpu_set_speed_cap(&freq);
+#ifdef CONFIG_EPRJ_CPUMANAGER
+		tegra_auto_hotplug_suspend(false);
+#endif
 		pr_info("Tegra cpufreq resume: restoring frequency to %d kHz\n",
 			freq);
 	}
-	mutex_unlock(&tegra_cpu_lock);
 
-	return NOTIFY_OK;
+out:
+	mutex_unlock(&tegra_cpu_lock);
+	return retval;
 }
 
 static struct notifier_block tegra_cpu_pm_notifier = {
@@ -848,7 +868,9 @@ static int __init tegra_cpufreq_init(void)
 	if (IS_ERR_OR_NULL(table_data))
 		return -EINVAL;
 
+#ifndef CONFIG_EPRJ_CPUMANAGER
 	suspend_index = table_data->suspend_index;
+#endif
 
 	ret = tegra_throttle_init(&tegra_cpu_lock);
 	if (ret)
@@ -859,9 +881,7 @@ static int __init tegra_cpufreq_init(void)
 		return ret;
 
 	freq_table = table_data->freq_table;
-	mutex_lock(&tegra_cpu_lock);
 	tegra_cpu_edp_init(false);
-	mutex_unlock(&tegra_cpu_lock);
 
 	ret = register_pm_notifier(&tegra_cpu_pm_notifier);
 
@@ -876,26 +896,6 @@ static int __init tegra_cpufreq_init(void)
 
 	return cpufreq_register_driver(&tegra_cpufreq_driver);
 }
-
-#if CONFIG_TEGRA_CPU_FREQ_GOVERNOR_EARLY_INIT
-static int __init tegra_cpufreq_governor_init(void)
-{
-	/*
-	 * At this point, the full range of clocks should be available
-	 * Set the CPU governor to performance for a faster boot up
-	 */
-	unsigned int i;
-	static char *start_scaling_governor = "performance";
-	for_each_online_cpu(i) {
-		if (cpufreq_set_gov(start_scaling_governor, i))
-			pr_info("Failed to set the governor to %s " \
-				"for cpu %u\n", start_scaling_governor, i);
-	}
-	return 0;
-}
-
-late_initcall_sync(tegra_cpufreq_governor_init);
-#endif
 
 static void __exit tegra_cpufreq_exit(void)
 {

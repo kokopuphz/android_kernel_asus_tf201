@@ -267,9 +267,6 @@ static struct tegra_dc_platform_data dalmore_disp2_pdata = {
 	.default_out	= &dalmore_disp2_out,
 	.fb		= &dalmore_disp2_fb_data,
 	.emc_clk_rate	= 300000000,
-#ifdef CONFIG_TEGRA_DC_CMU
-	.cmu_enable	= 1,
-#endif
 };
 
 static struct platform_device dalmore_disp2_device = {
@@ -466,17 +463,6 @@ int __init dalmore_panel_init(void)
 	__tegra_move_framebuffer(&dalmore_nvmap_device,
 		tegra_fb_start, tegra_bootloader_fb_start,
 			min(tegra_fb_size, tegra_bootloader_fb_size));
-
-	/*
-	 * If the bootloader fb2 is valid, copy it to the fb2, or else
-	 * clear fb2 to avoid garbage on dispaly2.
-	 */
-	if (tegra_bootloader_fb2_size)
-		tegra_move_framebuffer(tegra_fb2_start,
-			tegra_bootloader_fb2_start,
-			min(tegra_fb2_size, tegra_bootloader_fb2_size));
-	else
-		tegra_clear_framebuffer(tegra_fb2_start, tegra_fb2_size);
 
 	res = platform_get_resource_byname(&dalmore_disp2_device,
 		IORESOURCE_MEM, "fbmem");

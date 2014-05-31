@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/board-roth-fan.c
  *
- * Copyright (c) 2012-2013 NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -25,65 +25,30 @@
 
 #include "gpio-names.h"
 #include "devices.h"
-#include "board.h"
-#include "board-common.h"
 #include "board-roth.h"
-#include "tegra-board-id.h"
 
-static struct pwm_fan_platform_data fan_data_yltc_8k = {
+static struct pwm_fan_platform_data fan_data = {
 	.active_steps = MAX_ACTIVE_STATES,
+	.active_temps = {59, 60, 61, 62, 63, 64, 65, 66, 67, 71},
 	.active_rpm = {
 		0, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000, 11000},
 	.active_pwm = {0, 158*1024, 227*1024 , 230*1024, 235*1024, 240*1024,
 				245*1024, 250*1024, 252*1024, 255*1024},
 	.active_rru = {1024*50, 1024, 1024, 256, 256, 256, 256, 256, 256, 256},
 	.active_rrd = {1024*50, 1024, 1024, 256, 256, 256, 256, 128, 128, 128},
-	/*Lookup table to get the actual state cap*/
-	.state_cap_lookup = {1, 1, 1, 1, 1, 1, 1, 2, 2, 2},
 	.pwm_period = 256,
 	.pwm_id = 0,
 	.step_time = 100, /*msecs*/
-	.state_cap = 1,
+	.pwm_cap = 158,
 	.precision_multiplier = 1024,
-	.tach_gpio = -1,
-	.pwm_gpio = TEGRA_GPIO_PU3,
 };
 
-static struct pwm_fan_platform_data fan_data_delta_6k = {
-	.active_steps = MAX_ACTIVE_STATES,
-	.active_rpm = {
-		0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 10000, 11000},
-	.active_pwm = {0, 80*1024, 110*1024 , 150*1024, 235*1024, 240*1024,
-				245*1024, 250*1024, 252*1024, 255*1024},
-	.active_rru = {1024*40, 1024*2, 1024, 256,
-						256, 256, 256, 256, 256, 256},
-	.active_rrd = {1024*40, 1024*2, 1024, 256, 256,
-						256, 256, 128, 128, 128},
-	.state_cap_lookup = {2, 2, 2, 2, 2, 2, 2, 3, 3, 3},
-	.pwm_period = 256,
-	.pwm_id = 0,
-	.step_time = 100, /*msecs*/
-	.state_cap = 2,
-	.precision_multiplier = 1024,
-	.tach_gpio = TEGRA_GPIO_PU2,
-	.pwm_gpio = TEGRA_GPIO_PU3,
-};
-
-static struct platform_device pwm_fan_therm_cooling_device_yltc_8k = {
+static struct platform_device pwm_fan_therm_cooling_device = {
 	.name = "pwm-fan",
 	.id = -1,
 	.num_resources = 0,
 	.dev = {
-		.platform_data = &fan_data_yltc_8k,
-	},
-};
-
-static struct platform_device pwm_fan_therm_cooling_device_delta_6k = {
-	.name = "pwm-fan",
-	.id = -1,
-	.num_resources = 0,
-	.dev = {
-		.platform_data = &fan_data_delta_6k,
+		.platform_data = &fan_data,
 	},
 };
 
@@ -94,9 +59,6 @@ static struct platform_device *roth_fan_device[] = {
 int __init roth_fan_init(void)
 {
 	int err;
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
 
 	err = gpio_request(TEGRA_GPIO_PU3, "pwm-fan");
 	if (err < 0) {
@@ -104,15 +66,7 @@ int __init roth_fan_init(void)
 		return err;
 	}
 	gpio_free(TEGRA_GPIO_PU3);
-
-	if (board_info.board_id == BOARD_P2560) {
-		platform_device_register(
-				&pwm_fan_therm_cooling_device_delta_6k);
-		pr_info("FAN:registering for P2560\n");
-	} else {
-		platform_device_register(&pwm_fan_therm_cooling_device_yltc_8k);
-		pr_info("FAN:registering for P2454\n");
-	}
+	platform_device_register(&pwm_fan_therm_cooling_device);
 
 	err = platform_add_devices(roth_fan_device,
 				ARRAY_SIZE(roth_fan_device));

@@ -30,6 +30,11 @@ struct tegra_usb_phy;
 struct tegra_usb_phy *tegra_usb_phy_open(struct platform_device *pdev);
 
 /**
+ * Closes the phy controller and its resources
+ */
+void tegra_usb_phy_close(struct tegra_usb_phy *phy);
+
+/**
  * Handles interrupts specific to the phy interface
  * Note: udc or ehci driver will handle the controller interrupts
  */
@@ -107,6 +112,7 @@ bool tegra_usb_phy_nv_charger_detected(struct tegra_usb_phy *phy);
  *  or not, returns true if remote/hotplug wake is detected.
  */
 bool tegra_usb_phy_pmc_wakeup(struct tegra_usb_phy *phy);
+bool tegra_usb_phy_remote_wakeup(struct tegra_usb_phy *phy);
 
 /**
  * Indicates controller has HOST PC register set or not
@@ -118,11 +124,14 @@ bool tegra_usb_phy_has_hostpc(struct tegra_usb_phy *phy);
  */
 bool tegra_usb_phy_otg_supported(struct tegra_usb_phy *phy);
 
+#ifdef CONFIG_MACH_ENDEAVORU
+int tegra_usb_set_vbus_wakeup(int irq);
+void tegra_usb_set_usb_clk(struct tegra_usb_phy *phy, bool pull_up);
+#endif
+
 
 void tegra_usb_phy_memory_prefetch_on(struct tegra_usb_phy *phy);
 
 void tegra_usb_phy_memory_prefetch_off(struct tegra_usb_phy *phy);
-
-void tegra_usb_enable_vbus(struct tegra_usb_phy *phy, bool enable);
 
 #endif /* __MACH_USB_PHY_H */

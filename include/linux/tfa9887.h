@@ -1,18 +1,3 @@
-/*
- * include/linux/tfa9887.h
- *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
 
 #ifndef __LINUX_TFA9887_H
 #define __LINUX_TFA9887_H
@@ -23,11 +8,10 @@
 #define MAX_DB_INDEX 15
 #define PRESET_DEFAULT 4
 struct tfa9887_priv {
-	struct regmap *regmap;
-	int irq;
-	bool deviceInit;
+        struct regmap *regmap;
+        int irq;
+        bool deviceInit;
 	struct mutex lock;
-	char* speaker_data;
 };
 
 typedef enum Tfa9887_Mute {
@@ -72,7 +56,7 @@ int Tfa9887_SetEq(void);
 
 int SetEq(struct tfa9887_priv *tfa9887,struct tfa9887_priv *tfa9887_byte);
 
-int Tfa9887_SetVolume(unsigned int index);
+int Tfa9887_SetPreset(unsigned int preset);
 
 int SetPreset(struct tfa9887_priv *tfa9887,struct tfa9887_priv *tfa9887_byte);
 
@@ -87,11 +71,6 @@ void resetMtpEx(struct tfa9887_priv *tfa9887);
 int checkMTPEX(struct tfa9887_priv *tfa9887);
 
 void setOtc(struct tfa9887_priv *tfa9887, unsigned short otcOn);
-
-int Tfa9887_setSampleRate(int sRate);
-
-int setSampleRate(struct tfa9887_priv *tfa9887, int sRate);
-
 
 typedef enum Tfa9887_AmpInputSel {
 	Tfa9887_AmpInputSel_I2SLeft,

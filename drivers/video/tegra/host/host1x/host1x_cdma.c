@@ -3,7 +3,7 @@
  *
  * Tegra Graphics Host Command DMA
  *
- * Copyright (c) 2010-2013, NVIDIA Corporation.
+ * Copyright (c) 2010-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -19,11 +19,9 @@
  */
 
 #include <linux/slab.h>
-#include <linux/scatterlist.h>
 #include "nvhost_acm.h"
 #include "nvhost_cdma.h"
 #include "nvhost_channel.h"
-#include "debug.h"
 #include "dev.h"
 #include "chip_support.h"
 #include "nvhost_memmgr.h"
@@ -61,7 +59,6 @@ static void push_buffer_reset(struct push_buffer *pb)
 /**
  * Init push buffer resources
  */
-static void push_buffer_destroy(struct push_buffer *pb);
 static int push_buffer_init(struct push_buffer *pb)
 {
 	struct nvhost_cdma *cdma = pb_to_cdma(pb);
@@ -82,18 +79,15 @@ static int push_buffer_init(struct push_buffer *pb)
 		goto fail;
 	}
 	pb->mapped = mem_op().mmap(pb->mem);
-	if (IS_ERR_OR_NULL(pb->mapped)) {
-		pb->mapped = NULL;
+	if (pb->mapped == NULL)
 		goto fail;
-	}
 
 	/* pin pushbuffer and get physical address */
-	pb->sgt = mem_op().pin(mgr, pb->mem);
-	if (IS_ERR(pb->sgt)) {
-		pb->sgt = 0;
+	pb->phys = mem_op().pin(mgr, pb->mem);
+	if (pb->phys >= 0xfffff000) {
+		pb->phys = 0;
 		goto fail;
 	}
-	pb->phys = sg_dma_address(pb->sgt->sgl);
 
 	/* memory for storing nvmap client and handles for each opcode pair */
 	pb->client_handle = kzalloc(NVHOST_GATHER_QUEUE_SIZE *
@@ -109,7 +103,7 @@ static int push_buffer_init(struct push_buffer *pb)
 	return 0;
 
 fail:
-	push_buffer_destroy(pb);
+	cdma_pb_op().destroy(pb);
 	return -ENOMEM;
 }
 
@@ -124,7 +118,7 @@ static void push_buffer_destroy(struct push_buffer *pb)
 		mem_op().munmap(pb->mem, pb->mapped);
 
 	if (pb->phys != 0)
-		mem_op().unpin(mgr, pb->mem, pb->sgt);
+		mem_op().unpin(mgr, pb->mem);
 
 	if (pb->mem)
 		mem_op().put(mgr, pb->mem);
@@ -451,10 +445,6 @@ static void cdma_timeout_handler(struct work_struct *work)
 	dev = cdma_to_dev(cdma);
 	sp = &dev->syncpt;
 	ch = cdma_to_channel(cdma);
-
-	if (nvhost_debug_force_timeout_dump ||
-		cdma->timeout.timeout_debug_dump)
-		nvhost_debug_dump(cdma_to_dev(cdma));
 
 	mutex_lock(&cdma->lock);
 

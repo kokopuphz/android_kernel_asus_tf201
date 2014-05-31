@@ -37,6 +37,14 @@
 
 #include "signal.h"
 
+#ifdef CONFIG_MACH_X3
+#include <linux/gpio.h>
+#include <linux/mfd/max77663-core.h>
+#include "../arch/arm/mach-tegra/gpio-names.h"
+#include "../arch/arm/mach-tegra/eprj_x3/include/lge/board-x3-nv.h"
+#include "../arch/arm/mach-tegra/eprj_x3/include/lge/board-x3.h"
+#endif
+
 static const char *handler[]= { "prefetch abort", "data abort", "address exception", "interrupt" };
 
 void *vectors_page;
@@ -290,6 +298,15 @@ void die(const char *str, struct pt_regs *regs, int err)
 	bust_spinlocks(0);
 	add_taint(TAINT_DIE);
 	raw_spin_unlock_irq(&die_lock);
+
+#ifdef CONFIG_MACH_X3
+	max77663_set_ScratchRegister( (1<<0) ); /* RESET */
+	gpio_set_value(TEGRA_GPIO_PN6, 0);	/* Backlight OFF */
+	gpio_set_value(MODEM_PWR_ON, 0);	/* XMM6260 OFF */
+	udelay(200);
+	gpio_set_value(MODEM_RESET, 0);		/* XMM6260 RST */
+#endif
+
 	oops_exit();
 
 	if (in_interrupt())
@@ -388,20 +405,23 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 #endif
 			instr = *(u32 *) pc;
 	} else if (thumb_mode(regs)) {
-		get_user(instr, (u16 __user *)pc);
+		if (get_user(instr, (u16 __user *)pc))
+			goto die_sig;
 		if (is_wide_instruction(instr)) {
 			unsigned int instr2;
-			get_user(instr2, (u16 __user *)pc+1);
+			if (get_user(instr2, (u16 __user *)pc+1))
+				goto die_sig;
 			instr <<= 16;
 			instr |= instr2;
 		}
-	} else {
-		get_user(instr, (u32 __user *)pc);
+	} else if (get_user(instr, (u32 __user *)pc)) {
+		goto die_sig;
 	}
 
 	if (call_undef_hook(regs, instr) == 0)
 		return;
 
+die_sig:
 #ifdef CONFIG_DEBUG_USER
 	if (user_debug & UDBG_UNDEFINED) {
 		printk(KERN_INFO "%s (%d): undefined instruction: pc=%p\n",

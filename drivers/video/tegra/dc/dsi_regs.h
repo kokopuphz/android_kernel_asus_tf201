@@ -1,7 +1,7 @@
 /*
- * drivers/video/tegra/dc/dsi_regs.h
+ * drivers/video/tegra/dc/dsi.h
  *
- * Copyright (c) 2011-2013, NVIDIA CORPORATION, All rights reserved.
+ * Copyright (c) 2011-2012, NVIDIA CORPORATION, All rights reserved.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -18,8 +18,8 @@
 #define __DRIVERS_VIDEO_TEGRA_DC_DSI_REG_H__
 
 enum {
-	TEGRA_DSI_PAD_ENABLE,
-	TEGRA_DSI_PAD_DISABLE,
+	TEGRA_DSI_DISABLE,
+	TEGRA_DSI_ENABLE,
 };
 
 /* These are word offsets from base (not byte offsets) */
@@ -343,57 +343,9 @@ enum {
 #define DSI_PAD_CONTROL_PAD_LPUPADJ(x)		(((x) & 0x3) << 14)
 #define DSI_PAD_CONTROL_PAD_LPDNADJ(x)		(((x) & 0x3) << 12)
 
-#define DSI_PAD_CONTROL_0_VS1 0x4b
-#define DSI_PAD_CONTROL_0_VS1_PAD_PULLDN_CLK_ENAB(x)	(((x) & 0x1) << 24)
-#define DSI_PAD_CONTROL_0_VS1_PAD_PULLDN_ENAB(x)	(((x) & 0xf) << 16)
-#define DSI_PAD_CONTROL_0_VS1_PAD_PDIO_CLK(x)		(((x) & 0x1) << 8)
-#define DSI_PAD_CONTROL_0_VS1_PAD_PDIO(x)		(((x) & 0xf) << 0)
-
 #define DSI_PAD_CONTROL_CD 0x4c
-#define DSI_PAD_CONTROL_CD_VS1 0x4c
 #define DSI_PAD_CD_STATUS 0x4d
-#define DSI_PAD_CD_STATUS_VS1 0x4d
-
-#define DSI_PAD_CONTROL_1_VS1 0x4f
-#define DSI_PAD_OUTADJ3(x)	(((x) & 0x7) << 12)
-#define DSI_PAD_OUTADJ2(x)	(((x) & 0x7) << 8)
-#define DSI_PAD_OUTADJ1(x)	(((x) & 0x7) << 4)
-#define DSI_PAD_OUTADJ0(x)	(((x) & 0x7) << 0)
-
-#define DSI_PAD_CONTROL_2_VS1 0x50
-#define DSI_PAD_SLEWUPADJ(x)	(((x) & 0x7) << 16)
-#define DSI_PAD_SLEWDNADJ(x)	(((x) & 0x7) << 12)
-#define DSI_PAD_LPUPADJ(x)	(((x) & 0x7) << 8)
-#define DSI_PAD_LPDNADJ(x)	(((x) & 0x7) << 4)
-#define DSI_PAD_OUTADJCLK(x)	(((x) & 0x7) << 0)
-
-#define DSI_PAD_CONTROL_3_VS1 0x51
-#define DSI_PAD_PDVCLAMP(x)	(((x) & 0x1) << 28)
-#define DSI_PAD_BANDWD_IN(x)	(((x) & 0x1) << 16)
-#define DSI_PAD_PREEMP_PD_CLK(x)	(((x) & 0x3) << 12)
-#define DSI_PAD_PREEMP_PU_CLK(x)	(((x) & 0x3) << 8)
-#define DSI_PAD_PREEMP_PD(x)	(((x) & 0x3) << 4)
-#define DSI_PAD_PREEMP_PU(x)	(((x) & 0x3) << 0)
-
-#define DSI_PAD_CONTROL_4_VS1 0x52
-#define DSI_PAD_HS_BSO_CLK(x)	(((x) & 0x1) << 28)
-#define DSI_PAD_HS_BSO(x)	(((x) & 0xf) << 20)
-#define DSI_PAD_LP_BSO_CLK(x)	(((x) & 0x1) << 16)
-#define DSI_PAD_LP_BSO(x)	(((x) & 0xf) << 8)
-#define DSI_PAD_TXBW_EN(x)	(((x) & 0x1) << 4)
-#define DSI_PAD_REV_CLK(x)	(((x) & 0x1) << 0)
-
 #define DSI_VID_MODE_CONTROL 0x4e
-
-#define DSI_GANGED_MODE_CONTROL 0x53
-#define DSI_GANGED_MODE_CONTROL_EN(x)			(((x) & 0x1) << 0)
-
-#define DSI_GANGED_MODE_START 0x54
-#define DSI_GANGED_MODE_START_POINTER(x)		(((x) & 0x1fff) << 0)
-
-#define DSI_GANGED_MODE_SIZE 0x55
-#define DSI_GANGED_MODE_SIZE_VALID_LOW_WIDTH(x)		(((x) & 0x1fff) << 16)
-#define DSI_GANGED_MODE_SIZE_VALID_HIGH_WIDTH(x)	(((x) & 0x1fff) << 0)
 
 #endif
 

@@ -851,38 +851,18 @@ static struct mpu_platform_data mpu_gyro_data = {
 	.int_config	= 0x00,
 	.level_shifter	= 0,
 	.orientation	= MPU_GYRO_ORIENTATION,
-	.sec_slave_type	= SECONDARY_SLAVE_TYPE_NONE,
+	.sec_slave_type	= SECONDARY_SLAVE_TYPE_COMPASS,
+	.sec_slave_id	= COMPASS_ID_AK8963,
+	.secondary_i2c_addr	= MPU_COMPASS_ADDR,
+	.secondary_orientation	= MPU_COMPASS_ORIENTATION,
 	.key		= {0x4E, 0xCC, 0x7E, 0xEB, 0xF6, 0x1E, 0x35, 0x22,
 			   0x00, 0x34, 0x0D, 0x65, 0x32, 0xE9, 0x94, 0x89},
-};
-
-static struct mpu_platform_data mpu_compass_data = {
-	.orientation	= MPU_COMPASS_ORIENTATION,
-	.config		= NVI_CONFIG_BOOT_MPU,
-};
-
-static struct mpu_platform_data bmp180_pdata = {
-	.config		= NVI_CONFIG_BOOT_MPU,
 };
 
 static struct i2c_board_info __initdata inv_mpu_i2c0_board_info[] = {
 	{
 		I2C_BOARD_INFO(MPU_GYRO_NAME, MPU_GYRO_ADDR),
 		.platform_data = &mpu_gyro_data,
-	},
-	{
-		/* The actual BMP180 address is 0x77 but because this conflicts
-		 * with another device, this address is hacked so Linux will
-		 * call the driver.  The conflict is technically okay since the
-		 * BMP180 is behind the MPU.  Also, the BMP180 driver uses a
-		 * hard-coded address of 0x77 since it can't be changed anyway.
-		 */
-		I2C_BOARD_INFO("bmp180", 0x78),
-		.platform_data = &bmp180_pdata,
-	},
-	{
-		I2C_BOARD_INFO(MPU_COMPASS_NAME, MPU_COMPASS_ADDR),
-		.platform_data = &mpu_compass_data,
 	},
 };
 
@@ -979,7 +959,7 @@ static struct therm_est_data skin_data = {
 	.toffset = 9793,
 	.polling_period = 1100,
 	.ndevs = 2,
-	.tc1 = 10,
+	.tc1 = 5,
 	.tc2 = 1,
 	.devs = {
 			{
@@ -1005,8 +985,8 @@ static struct therm_est_data skin_data = {
 				},
 			},
 	},
-	.trip_temp = 45000,
-	.passive_delay = 15000,
+	.trip_temp = 43000,
+	.passive_delay = 5000,
 };
 
 static struct throttle_table skin_throttle_table[] = {

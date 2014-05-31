@@ -2,8 +2,6 @@
  *
  * Copyright (C) 2009 HTC Corporation.
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
- *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
  * may be copied, distributed, and modified under those terms.
@@ -203,10 +201,7 @@ static ssize_t a2220_hw_reset(struct a2220img *img)
 
 	while (retry--) {
 		/* Reset A2220 chip */
-		if (pdata->gpio_a2220_reset)
-			gpio_set_value(pdata->gpio_a2220_reset, 0);
-		else
-			gpio_set_value(VP_RESET, 1);
+		gpio_set_value(pdata->gpio_a2220_reset, 0);
 
 		/* Enable A2220 clock */
 		if (control_a2220_clk)
@@ -214,10 +209,7 @@ static ssize_t a2220_hw_reset(struct a2220img *img)
 		mdelay(1);
 
 		/* Take out of reset */
-		if (pdata->gpio_a2220_reset)
-			gpio_set_value(pdata->gpio_a2220_reset, 1);
-		else
-			gpio_set_value(VP_RESET, 0);
+		gpio_set_value(pdata->gpio_a2220_reset, 1);
 
 		msleep(50);	/* Delay before send I2C command */
 
@@ -1263,20 +1255,18 @@ static int a2220_probe(struct i2c_client *client,
 		}
 	}
 
-	if (pdata->gpio_a2220_reset) {
-		rc = gpio_request(pdata->gpio_a2220_reset, "a2220");
-		if (rc < 0) {
-			printk(KERN_ERR "%s: gpio request reset pin failed\n",
+	rc = gpio_request(pdata->gpio_a2220_reset, "a2220");
+	if (rc < 0) {
+		printk(KERN_ERR "%s: gpio request reset pin failed\n",
 			__func__);
-			goto err_free_gpio;
-		}
+		goto err_free_gpio;
+	}
 
-		rc = gpio_direction_output(pdata->gpio_a2220_reset, 1);
-		if (rc < 0) {
-			printk(KERN_ERR "%s: request reset gpio direction failed\n",
+	rc = gpio_direction_output(pdata->gpio_a2220_reset, 1);
+	if (rc < 0) {
+		printk(KERN_ERR "%s: request reset gpio direction failed\n",
 			__func__);
-			goto err_free_gpio_all;
-		}
+		goto err_free_gpio_all;
 	}
 
 	if (!i2c_check_functionality(client->adapter, I2C_FUNC_I2C)) {
@@ -1309,8 +1299,7 @@ static int a2220_probe(struct i2c_client *client,
 #endif
 	}
 
-	if (pdata->gpio_a2220_reset)
-		gpio_set_value(pdata->gpio_a2220_reset, 1);
+	gpio_set_value(pdata->gpio_a2220_reset, 1);
 
 	if (pdata->gpio_a2220_audience_chip_sel)
 		gpio_set_value(pdata->gpio_a2220_audience_chip_sel, 1);
@@ -1327,8 +1316,7 @@ static int a2220_probe(struct i2c_client *client,
 	return 0;
 
  err_free_gpio_all:
-	if (pdata->gpio_a2220_reset)
-		gpio_free(pdata->gpio_a2220_reset);
+	gpio_free(pdata->gpio_a2220_reset);
  err_free_gpio:
 	if (pdata->gpio_a2220_wakeup) {
 #ifdef CONFIG_USA_MODEL_SGH_T989

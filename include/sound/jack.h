@@ -25,7 +25,43 @@
 
 #include <sound/core.h>
 
+#ifdef CONFIG_MACH_X3
+#include <linux/switch.h>
+#include <linux/input.h>
+#endif
+
 struct input_dev;
+
+#ifdef CONFIG_MACH_X3
+extern struct headset_switch_data	*headset_sw_data;
+typedef enum {
+	X3_NONE,
+	X3_HEADSET,
+	X3_HEADPHONE,
+} headset_type_enum;
+
+typedef enum {
+	HOOK_PRESSED,
+	HOOK_RELEASED
+} hook_status_enum;
+
+struct headset_switch_data {
+	struct switch_dev sdev;
+	unsigned gpio;
+	unsigned hook_gpio;
+	unsigned ear_mic;
+	const char *name_on;
+	const char *name_off;
+	const char *state_on;
+	const char *state_off;
+	int irq;
+	int hook_irq;
+	struct work_struct work;
+	struct delayed_work delayed_work;
+	struct delayed_work hook_delayed_work[4]; //20130110 keunhui.park [Audio] prevent pressing hook key while unplugging headset
+	struct input_dev *ip_dev;
+};
+#endif
 
 /**
  * Jack types which can be reported.  These values are used as a

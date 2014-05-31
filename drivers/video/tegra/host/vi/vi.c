@@ -18,111 +18,42 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include <linux/export.h>
-#include <linux/resource.h>
-
-#include <mach/iomap.h>
-
+#include <linux/module.h>
 #include "dev.h"
 #include "bus_client.h"
-#include "vi.h"
 
-static int __devinit vi_probe(struct platform_device *dev)
+static int __devinit vi_probe(struct nvhost_device *dev,
+	struct nvhost_device_id *id_table)
 {
 	int err = 0;
-	struct vi *tegra_vi;
-	struct nvhost_device_data *pdata =
-		(struct nvhost_device_data *)dev->dev.platform_data;
 
-	dev_info(&dev->dev, "%s: ++\n", __func__);
-	tegra_vi = kzalloc(sizeof(struct vi), GFP_KERNEL);
-	if (!tegra_vi) {
-		dev_err(&dev->dev, "can't allocate memory for vi\n");
-		return -ENOMEM;
-	}
-
-	tegra_vi->ndev = dev;
-	pdata->private_data = tegra_vi;
-
-#ifdef CONFIG_TEGRA_CAMERA
-	tegra_vi->camera = tegra_camera_register(dev);
-	if (!tegra_vi->camera) {
-		dev_err(&dev->dev, "%s: can't register tegra_camera\n",
-				__func__);
-		goto camera_register_fail;
-	}
-#endif
-	pdata->pdev = dev;
-	platform_set_drvdata(dev, pdata);
 	err = nvhost_client_device_get_resources(dev);
-	if (err) {
-		goto camera_register_fail;
-	}
-	return nvhost_client_device_init(dev);
-
-camera_register_fail:
-	kfree(tegra_vi);
-	return err;
-}
-
-static int __exit vi_remove(struct platform_device *dev)
-{
-#ifdef CONFIG_TEGRA_CAMERA
-	int err = 0;
-	struct nvhost_device_data *pdata =
-		(struct nvhost_device_data *)dev->dev.platform_data;
-	struct vi *tegra_vi = (struct vi *)pdata->private_data;
-#endif
-
-	dev_info(&dev->dev, "%s: ++\n", __func__);
-
-#ifdef CONFIG_TEGRA_CAMERA
-	err = tegra_camera_unregister(tegra_vi->camera);
 	if (err)
 		return err;
-#endif
 
+	return nvhost_client_device_init(dev);
+}
+
+static int __exit vi_remove(struct nvhost_device *dev)
+{
+	/* Add clean-up */
 	return 0;
 }
 
 #ifdef CONFIG_PM
-static int vi_suspend(struct platform_device *dev, pm_message_t state)
+static int vi_suspend(struct nvhost_device *dev, pm_message_t state)
 {
-#ifdef CONFIG_TEGRA_CAMERA
-	struct nvhost_device_data *pdata =
-		(struct nvhost_device_data *)dev->dev.platform_data;
-	struct vi *tegra_vi = (struct vi *)pdata->private_data;
-#endif
-
-	dev_info(&dev->dev, "%s: ++\n", __func__);
-
-#ifdef CONFIG_TEGRA_CAMERA
-	tegra_camera_suspend(tegra_vi->camera);
-#endif
-
 	return nvhost_client_device_suspend(dev);
 }
 
-static int vi_resume(struct platform_device *dev)
+static int vi_resume(struct nvhost_device *dev)
 {
-#ifdef CONFIG_TEGRA_CAMERA
-	struct nvhost_device_data *pdata =
-		(struct nvhost_device_data *)dev->dev.platform_data;
-
-	struct vi *tegra_vi = (struct vi *)pdata->private_data;
-#endif
-
-	dev_info(&dev->dev, "%s: ++\n", __func__);
-
-#ifdef CONFIG_TEGRA_CAMERA
-	tegra_camera_resume(tegra_vi->camera);
-#endif
-
+	dev_info(&dev->dev, "resuming\n");
 	return 0;
 }
 #endif
 
-static struct platform_driver vi_driver = {
+static struct nvhost_driver vi_driver = {
 	.probe = vi_probe,
 	.remove = __exit_p(vi_remove),
 #ifdef CONFIG_PM
@@ -137,13 +68,13 @@ static struct platform_driver vi_driver = {
 
 static int __init vi_init(void)
 {
-	return platform_driver_register(&vi_driver);
+	return nvhost_driver_register(&vi_driver);
 }
 
 static void __exit vi_exit(void)
 {
-	platform_driver_unregister(&vi_driver);
+	nvhost_driver_unregister(&vi_driver);
 }
 
-late_initcall(vi_init);
+module_init(vi_init);
 module_exit(vi_exit);

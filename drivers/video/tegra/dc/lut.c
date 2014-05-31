@@ -85,12 +85,8 @@ static int tegra_dc_update_winlut(struct tegra_dc *dc, int win_idx, int fbovr)
 	struct tegra_dc_win *win = &dc->windows[win_idx];
 
 	mutex_lock(&dc->lock);
-	tegra_dc_io_start(dc);
-	tegra_dc_hold_dc_out(dc);
 
 	if (!dc->enabled) {
-		tegra_dc_release_dc_out(dc);
-		tegra_dc_io_end(dc);
 		mutex_unlock(&dc->lock);
 		return -EFAULT;
 	}
@@ -113,10 +109,7 @@ static int tegra_dc_update_winlut(struct tegra_dc *dc, int win_idx, int fbovr)
 	mutex_unlock(&dc->lock);
 
 	tegra_dc_update_windows(&win, 1);
-	tegra_dc_sync_windows(&win, 1);
 
-	tegra_dc_release_dc_out(dc);
-	tegra_dc_io_end(dc);
 	return 0;
 }
 
@@ -134,4 +127,3 @@ int tegra_dc_update_lut(struct tegra_dc *dc, int win_idx, int fboveride)
 	return 0;
 }
 EXPORT_SYMBOL(tegra_dc_update_lut);
-

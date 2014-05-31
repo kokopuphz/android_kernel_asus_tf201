@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/board-roth-power.c
  *
- * Copyright (c) 2012-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (C) 2012-2013 NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -22,13 +22,12 @@
 #include <linux/platform_device.h>
 #include <linux/resource.h>
 #include <linux/io.h>
-#include <linux/wakelock.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/fixed.h>
 #include <linux/mfd/palmas.h>
 #include <linux/regulator/tps51632-regulator.h>
-#include <linux/power/bq2419x-charger.h>
+#include <linux/mfd/bq2419x.h>
 #include <linux/max17048_battery.h>
 #include <linux/gpio.h>
 #include <linux/regulator/userspace-consumer.h>
@@ -44,7 +43,6 @@
 #include "cpu-tegra.h"
 #include "pm.h"
 #include "tegra-board-id.h"
-#include "board-pmu-defines.h"
 #include "board.h"
 #include "gpio-names.h"
 #include "board-roth.h"
@@ -55,9 +53,6 @@
 
 #define PMC_CTRL		0x0
 #define PMC_CTRL_INTR_LOW	(1 << 17)
-
-/* Wake_lock for A01 Boards */
-struct wake_lock roth_wake_lock;
 
 /* TPS51632 DC-DC converter */
 static struct regulator_consumer_supply tps51632_dcdc_supply[] = {
@@ -100,35 +95,46 @@ static struct i2c_board_info __initdata tps51632_boardinfo[] = {
 /* BQ2419X VBUS regulator */
 static struct regulator_consumer_supply bq2419x_vbus_supply[] = {
 	REGULATOR_SUPPLY("usb_vbus", "tegra-ehci.0"),
-	REGULATOR_SUPPLY("usb_vbus", "tegra-otg"),
 };
 
 static struct regulator_consumer_supply bq2419x_batt_supply[] = {
 	REGULATOR_SUPPLY("usb_bat_chg", "tegra-udc.0"),
-	REGULATOR_SUPPLY("usb_bat_chg", "tegra-otg"),
 };
 
-static struct bq2419x_vbus_platform_data bq2419x_vbus_pdata = {
-	.gpio_otg_iusb = TEGRA_GPIO_PI4,
+static struct regulator_init_data bq2419x_init_data = {
+	.constraints = {
+		.name = "bq2419x_vbus",
+		.min_uV = 0,
+		.max_uV = 5000000,
+		.valid_modes_mask = (REGULATOR_MODE_NORMAL |
+					REGULATOR_MODE_STANDBY),
+		.valid_ops_mask = (REGULATOR_CHANGE_MODE |
+					REGULATOR_CHANGE_STATUS |
+					REGULATOR_CHANGE_VOLTAGE),
+	},
 	.num_consumer_supplies = ARRAY_SIZE(bq2419x_vbus_supply),
 	.consumer_supplies = bq2419x_vbus_supply,
+};
+
+static struct bq2419x_regulator_platform_data bq2419x_reg_pdata = {
+	.reg_init_data = &bq2419x_init_data,
+	.gpio_otg_iusb = TEGRA_GPIO_PI4,
 };
 
 struct bq2419x_charger_platform_data bq2419x_charger_pdata = {
 	.use_usb = 1,
 	.use_mains = 1,
+	.gpio_interrupt = TEGRA_GPIO_PJ0,
+	.gpio_status = TEGRA_GPIO_PK0,
 	.update_status = max17048_battery_status,
 	.battery_check = max17048_check_battery,
 	.max_charge_current_mA = 3000,
 	.charging_term_current_mA = 100,
 	.consumer_supplies = bq2419x_batt_supply,
 	.num_consumer_supplies = ARRAY_SIZE(bq2419x_batt_supply),
-	.wdt_timeout	= 40,
-	.rtc_alarm_time = 3600,
-	.chg_restart_time = 1800,
 };
 
-struct max17048_battery_model max17048_mdata_p2454 __initdata = {
+struct max17048_battery_model max17048_mdata = {
 	.rcomp		= 152,
 	.soccheck_A	= 206,
 	.soccheck_B	= 208,
@@ -150,49 +156,26 @@ struct max17048_battery_model max17048_mdata_p2454 __initdata = {
 		0x1F, 0xE0, 0x1F, 0xE0, 0x11, 0xC0, 0x11, 0x20,
 		0x14, 0x60, 0x0B, 0xE0, 0x14, 0x80, 0x14, 0xC0,
 		0x0E, 0x20, 0x12, 0xA0, 0x03, 0x60, 0x03, 0x60,
-	},
-};
-
-struct max17048_battery_model max17048_mdata_p2560 __initdata = {
-	.rcomp          = 105,
-	.soccheck_A     = 240,
-	.soccheck_B     = 242,
-	.bits           = 19,
-	.alert_threshold = 0x00,
-	.one_percent_alerts = 0x40,
-	.alert_on_reset = 0x40,
-	.rcomp_seg      = 0x0080,
-	.hibernate      = 0x3080,
-	.vreset         = 0x3c96,
-	.valert         = 0xD4AA,
-	.ocvtest        = 55728,
-	.data_tbl = {
-		0xA9, 0x90, 0xB1, 0x60, 0xB5, 0xC0, 0xB7, 0x80,
-		0xBA, 0xF0, 0xBB, 0xA0, 0xBB, 0xE0, 0xBC, 0x50,
-		0xBC, 0xC0, 0xBD, 0x30, 0xBE, 0xD0, 0xC0, 0x90,
-		0xC1, 0xD0, 0xC6, 0x70, 0xCA, 0xD0, 0xCF, 0xB0,
-		0x0A, 0xF0, 0x0D, 0xE0, 0x0B, 0x30, 0x01, 0x90,
-		0x53, 0xB0, 0x78, 0xD0, 0x77, 0xB0, 0x7C, 0xF0,
-		0x7A, 0x70, 0x13, 0xE0, 0x13, 0x90, 0x1F, 0x30,
-		0x19, 0x00, 0x12, 0x10, 0x10, 0xB0, 0x10, 0xB0,
-	},
+        },
 };
 
 struct max17048_platform_data max17048_pdata = {
 	.use_ac = 0,
 	.use_usb = 0,
+	.model_data = &max17048_mdata,
 };
 
 static struct i2c_board_info __initdata max17048_boardinfo[] = {
 	{
 		I2C_BOARD_INFO("max17048", 0x36),
-		.platform_data  = &max17048_pdata,
+		.platform_data	= &max17048_pdata,
 	},
 };
 
 struct bq2419x_platform_data bq2419x_pdata = {
-	.vbus_pdata = &bq2419x_vbus_pdata,
+	.reg_pdata = &bq2419x_reg_pdata,
 	.bcharger_pdata = &bq2419x_charger_pdata,
+	.disable_watchdog = true,
 };
 
 static struct i2c_board_info __initdata bq2419x_boardinfo[] = {
@@ -226,19 +209,14 @@ static struct regulator_consumer_supply palmas_smps3_supply[] = {
 	REGULATOR_SUPPLY("vdd_audio_1v8", NULL),
 	REGULATOR_SUPPLY("vddio_uart", NULL),
 	REGULATOR_SUPPLY("pwrdet_uart", NULL),
-	REGULATOR_SUPPLY("pwrdet_nand", NULL),
-	REGULATOR_SUPPLY("pwrdet_bb", NULL),
-	REGULATOR_SUPPLY("pwrdet_cam", NULL),
 	REGULATOR_SUPPLY("dbvdd", NULL),
+	REGULATOR_SUPPLY("dvdd_lcd", NULL),
 	REGULATOR_SUPPLY("vlogic", "0-0068"),
-	REGULATOR_SUPPLY("vid", "0-000c"),
 };
 
 static struct regulator_consumer_supply palmas_smps45_supply[] = {
 	REGULATOR_SUPPLY("vdd_core", NULL),
 	REGULATOR_SUPPLY("vdd_core", "sdhci-tegra.0"),
-	REGULATOR_SUPPLY("vdd_core", "sdhci-tegra.2"),
-	REGULATOR_SUPPLY("vdd_core", "sdhci-tegra.3"),
 };
 
 #define palmas_smps457_supply palmas_smps45_supply
@@ -253,10 +231,9 @@ static struct regulator_consumer_supply palmas_smps8_supply[] = {
 	REGULATOR_SUPPLY("avdd_csi_dsi_pll", "tegradc.0"),
 	REGULATOR_SUPPLY("avdd_csi_dsi_pll", "tegradc.1"),
 	REGULATOR_SUPPLY("avdd_csi_dsi_pll", "vi"),
+	REGULATOR_SUPPLY("avdd_hdmi_pll", "tegradc.1"),
 	REGULATOR_SUPPLY("avdd_usb_pll", "tegra-ehci.2"),
 	REGULATOR_SUPPLY("avddio_usb", "tegra-ehci.2"),
-	/* This is an optional assignment, keep it as the last entry*/
-	REGULATOR_SUPPLY("avdd_hdmi_pll", "tegradc.1"),
 };
 
 static struct regulator_consumer_supply palmas_smps9_supply[] = {
@@ -280,21 +257,12 @@ static struct regulator_consumer_supply palmas_ldo3_supply[] = {
 	REGULATOR_SUPPLY("pwrdet_mipi", NULL),
 };
 
-static struct regulator_consumer_supply palmas_ldo4_supply[] = {
-        REGULATOR_SUPPLY("vpp_fuse", NULL),
-};
-
-static struct regulator_consumer_supply palmas_ldo5_supply[] = {
-	REGULATOR_SUPPLY("avdd_hdmi_pll", "tegradc.1"),
-};
-
 static struct regulator_consumer_supply palmas_ldo6_supply[] = {
 	REGULATOR_SUPPLY("vdd_sensor_2v85", NULL),
 	REGULATOR_SUPPLY("vdd", "0-004c"),
 	REGULATOR_SUPPLY("vdd", "1-004c"),
 	REGULATOR_SUPPLY("vdd", "1-004d"),
 	REGULATOR_SUPPLY("vdd", "0-0068"),
-	REGULATOR_SUPPLY("vdd", "0-000c"),
 };
 
 static struct regulator_consumer_supply palmas_ldo8_supply[] = {
@@ -313,7 +281,6 @@ static struct regulator_consumer_supply palmas_ldousb_supply[] = {
 	REGULATOR_SUPPLY("avdd_usb", "tegra-ehci.2"),
 	REGULATOR_SUPPLY("avdd_hdmi", "tegradc.1"),
 	REGULATOR_SUPPLY("vddio_hv", "tegradc.1"),
-	REGULATOR_SUPPLY("pwrdet_hv", NULL),
 };
 
 static struct regulator_consumer_supply palmas_regen1_supply[] = {
@@ -327,23 +294,43 @@ static struct regulator_consumer_supply palmas_regen2_supply[] = {
 	REGULATOR_SUPPLY("vdd_5v0_sys", NULL),
 };
 
-PALMAS_PDATA_INIT(smps12, 1200,  1500, NULL, 0, 0, 0, 0, NORMAL);
-PALMAS_PDATA_INIT(smps3, 1800,  1800, NULL, 0, 0, 0, NORMAL, 0);
-PALMAS_PDATA_INIT(smps45, 900,  1400, NULL, 1, 1, 0, 0, 0);
-PALMAS_PDATA_INIT(smps457, 900,  1400, NULL, 1, 1, 0, 0, 0);
-PALMAS_PDATA_INIT(smps8, 1050,  1050, NULL, 1, 1, 1, NORMAL, 0);
-PALMAS_PDATA_INIT(smps9, 2800,  2800, NULL, 0, 0, 0, FAST, 0);
-PALMAS_PDATA_INIT(smps10, 5000,  5000, NULL, 0, 0, 0, 0, 0);
-PALMAS_PDATA_INIT(ldo2, 2800,  2800, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo3, 1200,  1200, NULL, 1, 1, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo4, 1800, 1800, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo5, 1200,  1200, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo6, 2850,  2850, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo8, 900,  900, NULL, 1, 1, 1, 0, 0);
-PALMAS_PDATA_INIT(ldo9, 1800,  3300, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(ldousb, 3300,  3300, NULL, 0, 0, 1, 0, 0);
-PALMAS_PDATA_INIT(regen1, 3300,  3300, NULL, 0, 0, 0, 0, 0);
-PALMAS_PDATA_INIT(regen2, 5000,  5000, NULL, 0, 0, 0, 0, 0);
+#define PALMAS_PDATA_INIT(_name, _minmv, _maxmv, _supply_reg, _always_on, \
+	_boot_on, _apply_uv)						\
+	static struct regulator_init_data reg_idata_##_name = {		\
+		.constraints = {					\
+			.name = palmas_rails(_name),			\
+			.min_uV = (_minmv)*1000,			\
+			.max_uV = (_maxmv)*1000,			\
+			.valid_modes_mask = (REGULATOR_MODE_NORMAL |	\
+					REGULATOR_MODE_STANDBY),	\
+			.valid_ops_mask = (REGULATOR_CHANGE_MODE |	\
+					REGULATOR_CHANGE_STATUS |	\
+					REGULATOR_CHANGE_VOLTAGE),	\
+			.always_on = _always_on,			\
+			.boot_on = _boot_on,				\
+			.apply_uV = _apply_uv,				\
+		},							\
+		.num_consumer_supplies =				\
+			ARRAY_SIZE(palmas_##_name##_supply),		\
+		.consumer_supplies = palmas_##_name##_supply,		\
+		.supply_regulator = _supply_reg,			\
+	}
+
+PALMAS_PDATA_INIT(smps12, 1200,  1500, NULL, 0, 0, 0);
+PALMAS_PDATA_INIT(smps3, 1800,  1800, NULL, 0, 0, 0);
+PALMAS_PDATA_INIT(smps45, 900,  1400, NULL, 1, 1, 0);
+PALMAS_PDATA_INIT(smps457, 900,  1400, NULL, 1, 1, 0);
+PALMAS_PDATA_INIT(smps8, 1050,  1050, NULL, 1, 1, 1);
+PALMAS_PDATA_INIT(smps9, 2800,  2800, NULL, 0, 0, 0);
+PALMAS_PDATA_INIT(smps10, 5000,  5000, NULL, 0, 0, 0);
+PALMAS_PDATA_INIT(ldo2, 2800,  2800, NULL, 0, 0, 1);
+PALMAS_PDATA_INIT(ldo3, 1200,  1200, NULL, 1, 1, 1);
+PALMAS_PDATA_INIT(ldo6, 2850,  2850, NULL, 0, 0, 1);
+PALMAS_PDATA_INIT(ldo8, 900,  900, NULL, 1, 1, 1);
+PALMAS_PDATA_INIT(ldo9, 1800,  3300, NULL, 0, 0, 1);
+PALMAS_PDATA_INIT(ldousb, 3300,  3300, NULL, 0, 0, 1);
+PALMAS_PDATA_INIT(regen1, 3300,  3300, NULL, 0, 0, 0);
+PALMAS_PDATA_INIT(regen2, 5000,  5000, NULL, 0, 0, 0);
 
 #define PALMAS_REG_PDATA(_sname) &reg_idata_##_sname
 static struct regulator_init_data *roth_reg_data[PALMAS_NUM_REGS] = {
@@ -360,7 +347,7 @@ static struct regulator_init_data *roth_reg_data[PALMAS_NUM_REGS] = {
 	NULL,	/* LDO1 */
 	PALMAS_REG_PDATA(ldo2),
 	PALMAS_REG_PDATA(ldo3),
-	PALMAS_REG_PDATA(ldo4),
+	NULL,
 	NULL,
 	PALMAS_REG_PDATA(ldo6),
 	NULL,
@@ -385,14 +372,14 @@ static struct regulator_init_data *roth_reg_data[PALMAS_NUM_REGS] = {
 		.vsel = _vsel,						\
 	}
 
-PALMAS_REG_INIT(smps12, 0, PALMAS_EXT_CONTROL_NSLEEP, 0, 0, 0);
+PALMAS_REG_INIT(smps12, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps123, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps3, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps45, 0, PALMAS_EXT_CONTROL_NSLEEP, 0, 0, 0);
 PALMAS_REG_INIT(smps457, 0, PALMAS_EXT_CONTROL_NSLEEP, 0, 0, 0);
 PALMAS_REG_INIT(smps6, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps7, 0, 0, 0, 0, 0);
-PALMAS_REG_INIT(smps8, 0, PALMAS_EXT_CONTROL_NSLEEP, 0, 0, 0);
+PALMAS_REG_INIT(smps8, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps9, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(smps10, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldo1, 0, 0, 0, 0, 0);
@@ -403,7 +390,7 @@ PALMAS_REG_INIT(ldo5, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldo6, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldo7, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldo8, 0, 0, 0, 0, 0);
-PALMAS_REG_INIT(ldo9, 1, 0, 0, 0, 0);
+PALMAS_REG_INIT(ldo9, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldoln, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(ldousb, 0, 0, 0, 0, 0);
 PALMAS_REG_INIT(regen1, 0, 0, 0, 0, 0);
@@ -508,10 +495,6 @@ static struct regulator_consumer_supply fixed_reg_dvdd_ts_supply[] = {
 	REGULATOR_SUPPLY("dvdd", "spi3.2"),
 };
 
-/* EN_1V8_TS From TEGRA_GPIO_PU4 */
-static struct regulator_consumer_supply fixed_reg_dvdd_lcd_supply[] = {
-	REGULATOR_SUPPLY("dvdd_lcd", NULL),
-};
 /* Macro for defining fixed regulator sub device data */
 #define FIXED_SUPPLY(_name) "fixed_reg_"#_name
 #define FIXED_REG(_id, _var, _name, _in_supply, _always_on, _boot_on,	\
@@ -582,10 +565,6 @@ FIXED_REG(7,	com_1v8,	com_1v8,
 	palmas_rails(smps3),	0,	0,
 	TEGRA_GPIO_PX1,	false,	true,	0,	1800);
 
-FIXED_REG(8,	dvdd_lcd,	dvdd_lcd,
-	palmas_rails(smps3),	0,	0,
-	TEGRA_GPIO_PU4,	false,	true,	1,	1800);
-
 /*
  * Creating the fixed regulator device tables
  */
@@ -615,22 +594,13 @@ static struct platform_device *fixed_reg_devs_roth[] = {
 	ADD_FIXED_REG(com_3v3),
 	ADD_FIXED_REG(sd_3v3),
 	ADD_FIXED_REG(com_1v8),
-	ADD_FIXED_REG(dvdd_lcd),
 };
 
 int __init roth_palmas_regulator_init(void)
 {
 	void __iomem *pmc = IO_ADDRESS(TEGRA_PMC_BASE);
-	struct board_info board_info;
 	u32 pmc_ctrl;
 	int i;
-	int new_brd = 0;
-
-	tegra_get_board_info(&board_info);
-	new_brd = (board_info.board_id == BOARD_P2560);
-	/* Let avdd_hdmi_pll not depend on smps8 for roth 2560 */
-	if (new_brd)
-		(*PALMAS_REG_PDATA(smps8)).num_consumer_supplies--;
 
 	/* TPS65913: Normal state of INT request line is LOW.
 	 * configure the power management controller to trigger PMU
@@ -639,13 +609,14 @@ int __init roth_palmas_regulator_init(void)
 	pmc_ctrl = readl(pmc + PMC_CTRL);
 	writel(pmc_ctrl | PMC_CTRL_INTR_LOW, pmc + PMC_CTRL);
 	for (i = 0; i < PALMAS_NUM_REGS ; i++) {
-		/* Include ldo5 for roth 2560 */
-		if ((roth_reg_init[i] == PALMAS_REG_INIT_DATA(ldo5)) && new_brd)
-			pmic_platform.reg_data[i] = PALMAS_REG_PDATA(ldo5);
-		else
-			pmic_platform.reg_data[i] = roth_reg_data[i];
+		pmic_platform.reg_data[i] = roth_reg_data[i];
 		pmic_platform.reg_init[i] = roth_reg_init[i];
 	}
+
+	/* Set SMPS12 and 3 to normal mode if it is not there. */
+	reg_idata_smps12.constraints.initial_mode = REGULATOR_MODE_NORMAL;
+	reg_idata_smps3.constraints.initial_mode = REGULATOR_MODE_NORMAL;
+	reg_idata_smps9.constraints.initial_mode = REGULATOR_MODE_NORMAL;
 
 	i2c_register_board_info(4, palma_device,
 			ARRAY_SIZE(palma_device));
@@ -678,7 +649,7 @@ static struct platform_device roth_pda_power_device = {
 };
 
 static struct tegra_suspend_platform_data roth_suspend_data = {
-	.cpu_timer	= 500,
+	.cpu_timer	= 300,
 	.cpu_off_timer	= 300,
 	.suspend_mode	= TEGRA_SUSPEND_LP0,
 	.core_timer	= 0x157e,
@@ -760,15 +731,8 @@ int __init roth_regulator_init(void)
 	roth_cl_dvfs_init();
 #endif
 	tegra_get_board_info(&board_info);
-
-	if (board_info.board_id == BOARD_P2560)
-		max17048_pdata.model_data = &max17048_mdata_p2560;
-	else
-		max17048_pdata.model_data = &max17048_mdata_p2454;
-
 	roth_palmas_regulator_init();
 
-	bq2419x_boardinfo[0].irq = gpio_to_irq(TEGRA_GPIO_PJ0);
 	i2c_register_board_info(4, tps51632_boardinfo, 1);
 	i2c_register_board_info(0, max17048_boardinfo, 1);
 	i2c_register_board_info(0, bq2419x_boardinfo, 1);
@@ -778,15 +742,6 @@ int __init roth_regulator_init(void)
 
 int __init roth_suspend_init(void)
 {
-	struct board_info board_info;
-
-	tegra_get_board_info(&board_info);
-
-	if (board_info.board_id == BOARD_P2454 && board_info.fab == 0x1) {
-		wake_lock_init(&roth_wake_lock, WAKE_LOCK_SUSPEND, "roth-a01");
-		wake_lock(&roth_wake_lock);
-	}
-
 	tegra_init_suspend(&roth_suspend_data);
 	return 0;
 }
@@ -839,21 +794,21 @@ static struct soctherm_platform_data roth_soctherm_data = {
 			.trips = {
 				{
 					.cdev_type = "tegra-balanced",
-					.trip_temp = 90000,
+					.trip_temp = 84000,
 					.trip_type = THERMAL_TRIP_PASSIVE,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,
 				},
 				{
 					.cdev_type = "tegra-heavy",
-					.trip_temp = 100000,
+					.trip_temp = 94000,
 					.trip_type = THERMAL_TRIP_HOT,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,
 				},
 				{
 					.cdev_type = "tegra-shutdown",
-					.trip_temp = 102000,
+					.trip_temp = 104000,
 					.trip_type = THERMAL_TRIP_CRITICAL,
 					.upper = THERMAL_NO_LIMIT,
 					.lower = THERMAL_NO_LIMIT,

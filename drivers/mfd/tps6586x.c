@@ -201,7 +201,7 @@ int tps6586x_set_bits(struct device *dev, int reg, uint8_t bit_mask)
 	if (ret)
 		goto out;
 
-	if ((reg_val & bit_mask) != bit_mask) {
+	if ((reg_val & bit_mask) == 0) {
 		reg_val |= bit_mask;
 		ret = __tps6586x_write(to_i2c_client(dev), reg, reg_val);
 	}
@@ -256,19 +256,25 @@ out:
 EXPORT_SYMBOL_GPL(tps6586x_update);
 
 static struct i2c_client *tps6586x_i2c_client = NULL;
-static void tps6586x_power_off(void)
+int tps6586x_power_off(void)
 {
 	struct device *dev = NULL;
+	int ret = -EINVAL;
 
 	if (!tps6586x_i2c_client)
-		return;
+		return ret;
 
 	dev = &tps6586x_i2c_client->dev;
 
-	if (tps6586x_clr_bits(dev, TPS6586X_SUPPLYENE, EXITSLREQ_BIT))
-		return;
+	ret = tps6586x_clr_bits(dev, TPS6586X_SUPPLYENE, EXITSLREQ_BIT);
+	if (ret)
+		return ret;
 
-	tps6586x_set_bits(dev, TPS6586X_SUPPLYENE, SLEEP_MODE_BIT);
+	ret = tps6586x_set_bits(dev, TPS6586X_SUPPLYENE, SLEEP_MODE_BIT);
+	if (ret)
+		return ret;
+
+	return 0;
 }
 
 static int tps6586x_gpio_get(struct gpio_chip *gc, unsigned offset)
@@ -555,9 +561,6 @@ static int __devinit tps6586x_i2c_probe(struct i2c_client *client,
 		dev_err(&client->dev, "add devices failed: %d\n", ret);
 		goto err_add_devs;
 	}
-
-	if (pdata->use_power_off && !pm_power_off)
-		pm_power_off = tps6586x_power_off;
 
 	tps6586x_i2c_client = client;
 

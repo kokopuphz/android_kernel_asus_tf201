@@ -114,6 +114,11 @@ static inline void tegra_clear_framebuffer(unsigned long to, unsigned long size)
 }
 bool is_tegra_debug_uartport_hs(void);
 int get_tegra_uart_debug_port_id(void);
+#ifdef CONFIG_MACH_LGE
+int is_tegra_bootmode(void);
+int is_tegra_batteryexistWhenBoot(void);
+int is_tegra_batteryVerified(void);
+#endif
 int arb_lost_recovery(int scl_gpio, int sda_gpio);
 
 #ifdef CONFIG_ANDROID_RAM_CONSOLE
@@ -145,6 +150,9 @@ extern unsigned long nvdumper_reserved;
 #endif
 extern bool tegra_lp0_vec_relocate;
 extern unsigned long tegra_grhost_aperture;
+#ifdef CONFIG_MACH_ENDEAVORU
+extern unsigned long g_panel_id;
+#endif
 
 extern struct sys_timer tegra_timer;
 
@@ -188,7 +196,6 @@ void tegra_get_joystick_board_info(struct board_info *bi);
 void tegra_get_rightspeaker_board_info(struct board_info *bi);
 void tegra_get_leftspeaker_board_info(struct board_info *bi);
 int tegra_get_board_panel_id(void);
-int tegra_get_touch_panel_id(void);
 
 int get_core_edp(void);
 enum panel_type get_panel_type(void);
@@ -206,4 +213,13 @@ enum image_type get_tegra_image_type(void);
 int tegra_get_cvb_alignment_uV(void);
 int tegra_soc_device_init(const char *machine);
 int get_pwr_i2c_clk_rate(void);
+
+#ifdef CONFIG_MACH_ENDEAVORU
+void nvdumper_reserve_init(void);
+void* get_reboot_params(void);
+void* get_last_reboot_params(void);
+extern int dying_processors_read_proc(char *page, char **start, off_t off,
+		int count, int *eof, void *data);
+#endif
+
 #endif

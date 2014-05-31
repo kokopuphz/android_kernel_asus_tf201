@@ -37,6 +37,10 @@ static int ip_ttl_max = 255;
 static int ip_ping_group_range_min[] = { 0, 0 };
 static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
 
+#ifdef CONFIG_MACH_ENDEAVORU
+extern __be32 sysctl_tcp_syn_fail;
+#endif
+
 /* Update system visible IP port range */
 static void set_local_port_range(int range[2])
 {
@@ -590,6 +594,13 @@ static struct ctl_table ipv4_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
 	},
+	{
+		.procname	= "tcp_challenge_ack_limit",
+		.data		= &sysctl_tcp_challenge_ack_limit,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec
+	},
 #ifdef CONFIG_NET_DMA
 	{
 		.procname	= "tcp_dma_copybreak",
@@ -699,6 +710,16 @@ static struct ctl_table ipv4_table[] = {
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= &zero
 	},
+#ifdef CONFIG_MACH_ENDEAVORU
+	{
+		.procname	= "tcp_syn_fail",
+		.data		= &sysctl_tcp_syn_fail,
+		.maxlen		= sizeof(sysctl_tcp_syn_fail),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &zero
+	},
+#endif
 	{ }
 };
 

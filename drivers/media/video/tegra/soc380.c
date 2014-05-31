@@ -25,8 +25,6 @@
 #include <linux/miscdevice.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/module.h>
-
 #include <media/soc380.h>
 
 struct soc380_reg {
@@ -378,7 +376,7 @@ static int soc380_open(struct inode *inode, struct file *file)
 
 	file->private_data = info;
 	if (info->pdata && info->pdata->power_on)
-		info->pdata->power_on(&info->i2c_client->dev);
+		info->pdata->power_on();
 
 	dev_status.data = 0;
 	dev_status.status = 0;
@@ -389,7 +387,7 @@ static int soc380_open(struct inode *inode, struct file *file)
 int soc380_release(struct inode *inode, struct file *file)
 {
 	if (info->pdata && info->pdata->power_off)
-		info->pdata->power_off(&info->i2c_client->dev);
+		info->pdata->power_off();
 	file->private_data = NULL;
 	return 0;
 }

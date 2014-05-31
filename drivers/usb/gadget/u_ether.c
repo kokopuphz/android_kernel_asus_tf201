@@ -86,7 +86,7 @@ struct eth_dev {
 
 #ifdef CONFIG_USB_GADGET_DUALSPEED
 
-static unsigned qmult = 5;
+static unsigned qmult = 10;
 module_param(qmult, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(qmult, "queue length multiplier at high/super speed");
 
@@ -332,7 +332,8 @@ next_frame:
 		DBG(dev, "rx %s reset\n", ep->name);
 		defer_kevent(dev, WORK_RX_MEMORY);
 quiesce:
-		dev_kfree_skb_any(skb);
+		if (skb)
+			dev_kfree_skb_any(skb);
 		goto clean;
 
 	/* data overrun */
@@ -496,7 +497,6 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	unsigned long		flags;
 	struct usb_ep		*in;
 	u16			cdc_filter;
-	int			buffer_is_full = 0;
 
 	spin_lock_irqsave(&dev->lock, flags);
 	if (dev->port_usb) {
@@ -550,10 +550,8 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	list_del(&req->list);
 
 	/* temporarily stop TX queue when the freelist empties */
-	if (list_empty(&dev->tx_reqs)) {
-		buffer_is_full = 1;
+	if (list_empty(&dev->tx_reqs))
 		netif_stop_queue(net);
-	}
 	spin_unlock_irqrestore(&dev->req_lock, flags);
 
 	/* no buffer copies needed, unless the network stack did it
@@ -593,19 +591,17 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 
 	req->length = length;
 
-	/* In case user change qmult after f_rndis is enabled, qmult might be
-	 * misaligned with buffer size. Always enable interrupt when buffer
-	 * is full
-	 */
-	if (buffer_is_full)
-		req->no_interrupt = 0;
-
+#if 0
 	/* throttle high/super speed IRQ rate back slightly */
-	else if (gadget_is_dualspeed(dev->gadget))
+	if (gadget_is_dualspeed(dev->gadget))
 		req->no_interrupt = (dev->gadget->speed == USB_SPEED_HIGH ||
 				     dev->gadget->speed == USB_SPEED_SUPER)
 			? ((atomic_read(&dev->tx_qlen) % qmult) != 0)
 			: 0;
+#else
+	req->no_interrupt = 0;
+#endif
+
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 	switch (retval) {
 	default:
@@ -639,7 +635,7 @@ static void eth_start(struct eth_dev *dev, gfp_t gfp_flags)
 	rx_fill(dev, gfp_flags);
 
 	/* and open the tx floodgates */
-	atomic_set(&dev->tx_qlen, 1);
+	atomic_set(&dev->tx_qlen, 0);
 	netif_wake_queue(dev->net);
 }
 
@@ -678,8 +674,6 @@ static int eth_stop(struct net_device *net)
 	spin_lock_irqsave(&dev->lock, flags);
 	if (dev->port_usb) {
 		struct gether	*link = dev->port_usb;
-		const struct usb_endpoint_descriptor *in;
-		const struct usb_endpoint_descriptor *out;
 
 		if (link->close)
 			link->close(link);
@@ -693,14 +687,10 @@ static int eth_stop(struct net_device *net)
 		 * their own pace; the network stack can handle old packets.
 		 * For the moment we leave this here, since it works.
 		 */
-		in = link->in_ep->desc;
-		out = link->out_ep->desc;
 		usb_ep_disable(link->in_ep);
 		usb_ep_disable(link->out_ep);
 		if (netif_carrier_ok(net)) {
 			DBG(dev, "host still using in/out endpoints\n");
-			link->in_ep->desc = in;
-			link->out_ep->desc = out;
 			usb_ep_enable(link->in_ep);
 			usb_ep_enable(link->out_ep);
 		}
@@ -797,8 +787,10 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 	struct net_device	*net;
 	int			status;
 
-	if (the_dev)
-		return -EBUSY;
+	if (the_dev) {
+		memcpy(ethaddr, the_dev->host_mac, ETH_ALEN);
+		return 0;
+	}
 
 	net = alloc_etherdev(sizeof *dev);
 	if (!net)
@@ -831,6 +823,12 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 
 	SET_ETHTOOL_OPS(net, &ops);
 
+	/* two kinds of host-initiated state changes:
+	 *  - iff DATA transfer is active, carrier is "on"
+	 *  - tx queueing enabled if open *and* carrier is "on"
+	 */
+	netif_carrier_off(net);
+
 	dev->gadget = g;
 	SET_NETDEV_DEV(net, &g->dev);
 	SET_NETDEV_DEVTYPE(net, &gadget_type);
@@ -844,12 +842,6 @@ int gether_setup_name(struct usb_gadget *g, u8 ethaddr[ETH_ALEN],
 		INFO(dev, "HOST MAC %pM\n", dev->host_mac);
 
 		the_dev = dev;
-
-		/* two kinds of host-initiated state changes:
-		 *  - iff DATA transfer is active, carrier is "on"
-		 *  - tx queueing enabled if open *and* carrier is "on"
-		 */
-		netif_carrier_off(net);
 	}
 
 	return status;
@@ -971,7 +963,6 @@ void gether_disconnect(struct gether *link)
 	struct eth_dev		*dev = link->ioport;
 	struct usb_request	*req;
 
-	WARN_ON(!dev);
 	if (!dev)
 		return;
 

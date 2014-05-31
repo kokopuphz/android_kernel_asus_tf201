@@ -270,7 +270,11 @@ static int snd_soc_dapm_set_bias_level(struct snd_soc_dapm_context *dapm,
 	if (ret != 0)
 		goto out;
 
+#ifdef CONFIG_MACH_X3
+	if (card && card->set_bias_level_post && card->set_bias_level_post != 0x1000)
+#else
 	if (card && card->set_bias_level_post)
+#endif
 		ret = card->set_bias_level_post(card, dapm, level);
 out:
 	trace_snd_soc_bias_level_done(card, level);
@@ -3135,8 +3139,13 @@ EXPORT_SYMBOL_GPL(snd_soc_dapm_get_pin_status);
  * normal means at suspend time, it will not be turned on if it was not
  * already enabled.
  */
+#ifdef CONFIG_MACH_X3
+int snd_soc_dapm_ignore_suspend(struct snd_soc_dapm_context *dapm,
+				const char *pin, int ignore)
+#else
 int snd_soc_dapm_ignore_suspend(struct snd_soc_dapm_context *dapm,
 				const char *pin)
+#endif
 {
 	struct snd_soc_dapm_widget *w = dapm_find_widget(dapm, pin, false);
 
@@ -3145,7 +3154,11 @@ int snd_soc_dapm_ignore_suspend(struct snd_soc_dapm_context *dapm,
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_MACH_X3
+	w->ignore_suspend = ignore;
+#else
 	w->ignore_suspend = 1;
+#endif
 
 	return 0;
 }
@@ -3276,7 +3289,7 @@ void snd_soc_dapm_shutdown(struct snd_soc_card *card)
 {
 	struct snd_soc_codec *codec;
 
-	list_for_each_entry(codec, &card->codec_dev_list, list) {
+	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
 		soc_dapm_shutdown_codec(&codec->dapm);
 		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY)
 			snd_soc_dapm_set_bias_level(&codec->dapm,

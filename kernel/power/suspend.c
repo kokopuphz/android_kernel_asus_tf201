@@ -31,11 +31,22 @@
 #include "power.h"
 
 const char *const pm_states[PM_SUSPEND_MAX] = {
+#ifdef CONFIG_EARLYSUSPEND
+	[PM_SUSPEND_ON]		= "on",
+#endif
 	[PM_SUSPEND_STANDBY]	= "standby",
 	[PM_SUSPEND_MEM]	= "mem",
 };
 
 static const struct platform_suspend_ops *suspend_ops;
+
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
+static bool resume_from_deep_suspend;
+bool is_resume_from_deep_suspend(void)
+{
+	return resume_from_deep_suspend;
+}
+#endif
 
 /**
  * suspend_set_ops - Set the global suspend method table.
@@ -171,6 +182,7 @@ static int suspend_enter(suspend_state_t state, bool *wakeup)
 		*wakeup = pm_wakeup_pending();
 		if (!(suspend_test(TEST_CORE) || *wakeup)) {
 			error = suspend_ops->enter(state);
+			resume_from_deep_suspend = 1;
 			events_check_enabled = false;
 		}
 		syscore_resume();
@@ -279,6 +291,9 @@ static int enter_state(suspend_state_t state)
 	if (!mutex_trylock(&pm_mutex))
 		return -EBUSY;
 
+#ifdef CONFIG_ARCH_TEGRA_3x_SOC
+	resume_from_deep_suspend = 0;
+#endif
 	printk(KERN_INFO "PM: Syncing filesystems ... ");
 	sys_sync();
 	printk("done.\n");

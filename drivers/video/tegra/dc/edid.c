@@ -17,11 +17,10 @@
  *
  */
 
-
+#include <linux/module.h>
 #include <linux/debugfs.h>
 #include <linux/fb.h>
 #include <linux/i2c.h>
-#include <linux/module.h>
 #include <linux/seq_file.h>
 #include <linux/vmalloc.h>
 
@@ -32,6 +31,7 @@ struct tegra_edid_pvt {
 	struct tegra_edid_hdmi_eld	eld;
 	bool				support_stereo;
 	bool				support_underscan;
+	bool				support_vcdb;
 	/* Note: dc_edid must remain the last member */
 	struct tegra_dc_edid		dc_edid;
 };
@@ -195,6 +195,7 @@ int tegra_edid_parse_ext_block(const u8 *raw, int idx,
 	int len;
 	int i;
 	bool basic_audio = false;
+	int ret = 0;
 
 	ptr = &raw[0];
 
@@ -212,15 +213,22 @@ int tegra_edid_parse_ext_block(const u8 *raw, int idx,
 			basic_audio = true;
 		}
 	}
-
-	if (raw[3] & 0x80)
-		edid->support_underscan = 1;
-	else
-		edid->support_underscan = 0;
+	if(edid) {
+		if (raw[3] & 0x80)
+			edid->support_underscan = 1;
+		else
+			edid->support_underscan = 0;
+	}
 
 	ptr = &raw[4];
 
 	while (ptr < &raw[idx]) {
+
+		if (!edid) {
+			ret = -EINVAL;
+			break;
+		}
+
 		tmp = *ptr;
 		len = tmp & 0x1f;
 
@@ -302,6 +310,14 @@ int tegra_edid_parse_ext_block(const u8 *raw, int idx,
 			ptr += len; /* adding the header */
 			break;
 		}
+		case 7:
+		{
+			if ((len == 2) && (ptr[1] == 0))
+				edid->support_vcdb = 1;
+			len++; /* len does not include header */
+			ptr += len;
+			break;
+		}
 		default:
 			len++; /* len does not include header */
 			ptr += len;
@@ -309,7 +325,7 @@ int tegra_edid_parse_ext_block(const u8 *raw, int idx,
 		}
 	}
 
-	return 0;
+	return ret;
 }
 
 int tegra_edid_mode_support_stereo(struct fb_videomode *mode)
@@ -430,6 +446,7 @@ int tegra_edid_get_monspecs(struct tegra_edid *edid, struct fb_monspecs *specs)
 	kref_init(&new_data->refcnt);
 
 	new_data->support_stereo = 0;
+	new_data->support_vcdb = 0;
 
 	data = new_data->dc_edid.buf;
 
@@ -503,6 +520,14 @@ int tegra_edid_underscan_supported(struct tegra_edid *edid)
 		return 0;
 
 	return edid->data->support_underscan;
+}
+
+int tegra_edid_vcdb_supported(struct tegra_edid *edid)
+{
+	if ((!edid) || (!edid->data))
+		return 0;
+
+	return edid->data->support_vcdb;
 }
 
 int tegra_edid_get_eld(struct tegra_edid *edid, struct tegra_edid_hdmi_eld *elddata)

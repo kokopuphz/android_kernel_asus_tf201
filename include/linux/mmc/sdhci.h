@@ -2,7 +2,6 @@
  *  linux/include/linux/mmc/sdhci.h - Secure Digital Host Controller Interface
  *
  *  Copyright (C) 2005-2008 Pierre Ossman, All Rights Reserved.
- *  Copyright (c) 2013 NVIDIA Corporation, All Rights Reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -95,12 +94,6 @@ struct sdhci_host {
 /* Controller doesn't calculate max_discard_to */
 #define SDHCI_QUIRK_NO_CALC_MAX_DISCARD_TO 		(1ULL<<34)
 
-	unsigned int quirks2;	/* More deviations from spec. */
-
-#define SDHCI_QUIRK2_HOST_OFF_CARD_ON			(1<<0)
-/* Controller has incorrect preset values */
-#define SDHCI_QUIRK2_BROKEN_PRESET_VALUES		(1<<1)
-
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
 
@@ -128,9 +121,6 @@ struct sdhci_host {
 #define SDHCI_NEEDS_RETUNING	(1<<5)	/* Host needs retuning */
 #define SDHCI_AUTO_CMD12	(1<<6)	/* Auto CMD12 support */
 #define SDHCI_AUTO_CMD23	(1<<7)	/* Auto CMD23 support */
-#define SDHCI_PV_ENABLED	(1<<8)	/* Preset value enabled */
-#define SDHCI_SDIO_IRQ_ENABLED	(1<<9)	/* SDIO irq enabled */
-#define SDHCI_HS200_NEEDS_TUNING (1<<10)	/* HS200 needs tuning */
 
 	unsigned int version;	/* SDHCI spec. version */
 
@@ -140,8 +130,6 @@ struct sdhci_host {
 
 	unsigned int clock;	/* Current clock (MHz) */
 	u8 pwr;			/* Current voltage */
-
-	bool runtime_suspended;	/* Host is runtime suspended */
 
 	struct mmc_request *mrq;	/* Current request */
 	struct mmc_command *cmd;	/* Current command */
@@ -167,8 +155,6 @@ struct sdhci_host {
 
 	unsigned int caps;	/* Alternative capabilities */
 
-	struct dentry		*debugfs_root;
-
 	unsigned int            ocr_avail_sdio;	/* OCR bit masks */
 	unsigned int            ocr_avail_sd;
 	unsigned int            ocr_avail_mmc;
@@ -182,6 +168,5 @@ struct sdhci_host {
 	struct timer_list	tuning_timer;	/* Timer for tuning */
 
 	unsigned long private[0] ____cacheline_aligned;
-
 };
 #endif /* LINUX_MMC_SDHCI_H */

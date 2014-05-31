@@ -762,7 +762,7 @@ static void hdmi_intrinsic_event(struct hda_codec *codec, unsigned int res)
 	struct hdmi_spec *spec = codec->spec;
 	int tag = res >> AC_UNSOL_RES_TAG_SHIFT;
 	int pin_nid;
-	int pin_idx;
+	int pin_idx = 0;
 	struct hda_jack_tbl *jack;
 #ifdef CONFIG_SND_HDA_PLATFORM_NVIDIA_TEGRA
 	struct hdmi_eld *eld = &spec->pins[pin_idx].sink_eld;
@@ -962,8 +962,12 @@ static int hdmi_pcm_open(struct hda_pcm_stream *hinfo,
 	if (!static_hdmi_pcm && (eld->eld_valid || eld->lpcm_sad_ready)) {
 		snd_hdmi_eld_update_pcm_info(eld, hinfo);
 		if (hinfo->channels_min > hinfo->channels_max ||
-		    !hinfo->rates || !hinfo->formats)
+		    !hinfo->rates || !hinfo->formats) {
+			per_cvt->assigned = 0;
+			hinfo->nid = 0;
+			snd_hda_spdif_ctls_unassign(codec, pin_idx);
 			return -ENODEV;
+		}
 	}
 
 	/* Store the updated parameters */
@@ -1027,6 +1031,7 @@ static void hdmi_present_sense(struct hdmi_spec_per_pin *per_pin, int repoll)
 		"HDMI status: Codec=%d Pin=%d Presence_Detect=%d ELD_Valid=%d\n",
 		codec->addr, pin_nid, eld->monitor_present, eld_valid);
 
+	eld->eld_valid = false;
 	if (eld_valid) {
 		if (!snd_hdmi_get_eld(eld, codec, pin_nid))
 			snd_hdmi_show_eld(eld);

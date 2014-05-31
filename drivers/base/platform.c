@@ -505,6 +505,52 @@ void platform_driver_unregister(struct platform_driver *drv)
 EXPORT_SYMBOL_GPL(platform_driver_unregister);
 
 /**
+ * platform_driver_compat - creates a symlink for the driver, relative to the
+ * kobject of the driver.
+ * @drv: platform driver structure
+ * @path: the path relative to the sysfs directory of the driver.
+ *
+ * The final path component will be used as the name of the symlink. This
+ * creates a directory symlink.
+ */
+int platform_driver_compat(struct platform_driver *drv, const char *path)
+{
+	char path_buffer[strlen(path)];
+	const char *next_delim = NULL;
+	struct kobject *kobject = &drv->driver.p->kobj;
+
+	/* Find the appropriate container to put the link in.
+	   After this loop completes, path will contain the name of the symlink. */
+	while ((next_delim = strchr(path, '/')) != NULL) {
+		size_t chars = next_delim - path;
+		strncpy(path_buffer, path, chars);
+		path_buffer[chars] = '\0';
+		path = next_delim + 1;
+
+		/* See if we need to go up. */
+		if (strcmp(path_buffer, "..") == 0) {
+			if (!kobject) {
+				return -EINVAL;
+			}
+
+			if (kobject->parent) {
+				kobject = kobject->parent;
+			} else {
+				kobject = &kobject->kset->kobj;
+			}
+		} else if (strcmp(path_buffer, ".") == 0) {
+			/* Just swallow. */
+		} else {
+			/* Create a new directory. */
+			kobject = kobject_create_and_add(path_buffer, kobject);
+		}
+	}
+
+	return sysfs_create_link(kobject, &drv->driver.p->kobj, path);
+}
+EXPORT_SYMBOL_GPL(platform_driver_compat);
+
+/**
  * platform_driver_probe - register driver for non-hotpluggable device
  * @drv: platform driver structure
  * @probe: the driver probe routine, probably from an __init section

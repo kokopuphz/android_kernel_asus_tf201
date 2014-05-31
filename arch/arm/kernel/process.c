@@ -60,18 +60,6 @@ static const char *isa_modes[] = {
 
 static volatile int hlt_counter;
 
-#ifdef CONFIG_SMP
-void arch_trigger_all_cpu_backtrace(void)
-{
-	smp_send_all_cpu_backtrace();
-}
-#else
-void arch_trigger_all_cpu_backtrace(void)
-{
-	dump_stack();
-}
-#endif
-
 void disable_hlt(void)
 {
 	hlt_counter++;
@@ -248,11 +236,6 @@ void cpu_idle(void)
 		tick_nohz_idle_enter();
 		rcu_idle_enter();
 		while (!need_resched()) {
-#ifdef CONFIG_HOTPLUG_CPU
-			if (cpu_is_offline(smp_processor_id()))
-				cpu_die();
-#endif
-
 			/*
 			 * We need to disable interrupts here
 			 * to ensure we don't miss a wakeup call.
@@ -281,6 +264,10 @@ void cpu_idle(void)
 		tick_nohz_idle_exit();
 		idle_notifier_call_chain(IDLE_END);
 		schedule_preempt_disabled();
+#ifdef CONFIG_HOTPLUG_CPU
+		if (cpu_is_offline(smp_processor_id()))
+			cpu_die();
+#endif
 	}
 }
 

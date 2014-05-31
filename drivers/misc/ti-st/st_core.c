@@ -29,6 +29,13 @@
 #include <linux/skbuff.h>
 
 #include <linux/ti_wilink_st.h>
+#include "gps_drv.h"
+#include <htc/log.h>
+
+#ifdef PWR_DEVICE_TAG
+#undef PWR_DEVICE_TAG
+#endif
+#define PWR_DEVICE_TAG "BT_GPS"
 
 /* function pointer pointing to either,
  * st_kim_recv during registration to receive fw download responses
@@ -44,19 +51,14 @@ static void add_channel_to_table(struct st_data_s *st_gdata,
 	/* list now has the channel id as index itself */
 	st_gdata->list[new_proto->chnl_id] = new_proto;
 	st_gdata->is_registered[new_proto->chnl_id] = true;
-#ifdef CONFIG_ST_HOST_WAKE
-	st_host_wake_notify(new_proto->chnl_id, ST_PROTO_REGISTERED);
-#endif
 }
 
 static void remove_channel_from_table(struct st_data_s *st_gdata,
 		struct st_proto_s *proto)
 {
 	pr_info("%s: id %d\n", __func__, proto->chnl_id);
+/*	st_gdata->list[proto->chnl_id] = NULL; */
 	st_gdata->is_registered[proto->chnl_id] = false;
-#ifdef CONFIG_ST_HOST_WAKE
-	st_host_wake_notify(proto->chnl_id, ST_PROTO_UNREGISTERED);
-#endif
 }
 
 /*
@@ -70,7 +72,7 @@ int st_get_uart_wr_room(struct st_data_s *st_gdata)
 {
 	struct tty_struct *tty;
 	if (unlikely(st_gdata == NULL || st_gdata->tty == NULL)) {
-		pr_err("tty unavailable to perform write");
+		pr_err("tty unavailable to perform write\n");
 		return -1;
 	}
 	tty = st_gdata->tty;
@@ -89,7 +91,7 @@ int st_int_write(struct st_data_s *st_gdata,
 {
 	struct tty_struct *tty;
 	if (unlikely(st_gdata == NULL || st_gdata->tty == NULL)) {
-		pr_err("tty unavailable to perform write");
+		pr_err("tty unavailable to perform write\n");
 		return -EINVAL;
 	}
 	tty = st_gdata->tty;
@@ -107,13 +109,12 @@ int st_int_write(struct st_data_s *st_gdata,
  */
 void st_send_frame(unsigned char chnl_id, struct st_data_s *st_gdata)
 {
-	pr_debug(" %s(prot:%d) ", __func__, chnl_id);
+	pr_debug(" %s(prot:%d) \n", __func__, chnl_id);
 
 	if (unlikely
-	    (st_gdata == NULL || st_gdata->rx_skb == NULL
-	     || st_gdata->is_registered[chnl_id] == false)) {
-		pr_err("chnl_id %d not registered, no data to send?",
-			   chnl_id);
+			(st_gdata == NULL || st_gdata->rx_skb == NULL
+			 || st_gdata->is_registered[chnl_id] == false)) {
+		pr_err("chnl_id %d not registered, no data to send?\n", chnl_id);
 		kfree_skb(st_gdata->rx_skb);
 		return;
 	}
@@ -127,11 +128,12 @@ void st_send_frame(unsigned char chnl_id, struct st_data_s *st_gdata)
 			(st_gdata->list[chnl_id]->recv
 			(st_gdata->list[chnl_id]->priv_data, st_gdata->rx_skb)
 			     != 0)) {
-			pr_err(" proto stack %d's ->recv failed", chnl_id);
+			pr_err(" proto stack %d's ->recv failed\n", chnl_id);
+			kfree_skb(st_gdata->rx_skb);
 			return;
 		}
 	} else {
-		pr_err(" proto stack %d's ->recv null", chnl_id);
+		pr_err(" proto stack %d's ->recv null\n", chnl_id);
 		kfree_skb(st_gdata->rx_skb);
 	}
 	return;
@@ -147,15 +149,15 @@ void st_send_frame(unsigned char chnl_id, struct st_data_s *st_gdata)
 void st_reg_complete(struct st_data_s *st_gdata, char err)
 {
 	unsigned char i = 0;
-	pr_info(" %s ", __func__);
+	pr_info(" %s \n", __func__);
 	for (i = 0; i < ST_MAX_CHANNELS; i++) {
 		if (likely(st_gdata != NULL &&
-			st_gdata->is_registered[i] == true &&
-				st_gdata->list[i]->reg_complete_cb != NULL)) {
+				   st_gdata->is_registered[i] == true &&
+				   st_gdata->list[i]->reg_complete_cb != NULL)) {
 			st_gdata->list[i]->reg_complete_cb
-				(st_gdata->list[i]->priv_data, err);
+			(st_gdata->list[i]->priv_data, err);
 			pr_info("protocol %d's cb sent %d\n", i, err);
-			if (err) { /* cleanup registered protocol */
+			if (err) {	/* cleanup registered protocol */
 				st_gdata->protos_registered--;
 				st_gdata->is_registered[i] = false;
 			}
@@ -168,7 +170,7 @@ static inline int st_check_data_len(struct st_data_s *st_gdata,
 {
 	int room = skb_tailroom(st_gdata->rx_skb);
 
-	pr_debug("len %d room %d", len, room);
+	pr_debug("len %d room %d\n", len, room);
 
 	if (!len) {
 		/* Received packet has only packet header and
@@ -181,7 +183,7 @@ static inline int st_check_data_len(struct st_data_s *st_gdata,
 		/* Received packet's payload length is larger.
 		 * We can't accommodate it in created skb.
 		 */
-		pr_err("Data length is too large len %d room %d", len,
+		pr_err("Data length is too large len %d room %d\n", len,
 			   room);
 		kfree_skb(st_gdata->rx_skb);
 	} else {
@@ -250,12 +252,12 @@ void st_int_recv(void *disc_data,
 	ptr = (char *)data;
 	/* tty_receive sent null ? */
 	if (unlikely(ptr == NULL) || (st_gdata == NULL)) {
-		pr_err(" received null from TTY ");
+		pr_err(" received null from TTY \n");
 		return;
 	}
 
 	pr_debug("count %ld rx_state %ld"
-		   "rx_count %ld", count, st_gdata->rx_state,
+		   "rx_count %ld\n", count, st_gdata->rx_state,
 		   st_gdata->rx_count);
 
 	spin_lock_irqsave(&st_gdata->lock, flags);
@@ -275,7 +277,7 @@ void st_int_recv(void *disc_data,
 			switch (st_gdata->rx_state) {
 			/* Waiting for complete packet ? */
 			case ST_W4_DATA:
-				pr_debug("Complete pkt received");
+				sp_pr_info("Complete pkt received\n");
 				/* Ask ST CORE to forward
 				 * the packet to protocol driver */
 				st_send_frame(st_gdata->rx_chnl, st_gdata);
@@ -289,14 +291,14 @@ void st_int_recv(void *disc_data,
 				plen =
 				&st_gdata->rx_skb->data
 				[proto->offset_len_in_hdr];
-				pr_debug("plen pointing to %x\n", *plen);
+				sp_pr_debug("plen pointing to %x\n", *plen);
 				if (proto->len_size == 1)/* 1 byte len field */
 					payload_len = *(unsigned char *)plen;
 				else if (proto->len_size == 2)
 					payload_len =
 					__le16_to_cpu(*(unsigned short *)plen);
 				else
-					pr_info("%s: invalid length "
+					sp_pr_info("%s: invalid length "
 					"for id %d\n",
 					__func__, proto->chnl_id);
 				st_check_data_len(st_gdata, proto->chnl_id,
@@ -314,7 +316,7 @@ void st_int_recv(void *disc_data,
 		case LL_SLEEP_IND:
 		case LL_SLEEP_ACK:
 		case LL_WAKE_UP_IND:
-			pr_debug("PM packet");
+			sp_pr_debug("PM packet\n");
 			/* this takes appropriate action based on
 			 * sleep state received --
 			 */
@@ -331,7 +333,7 @@ void st_int_recv(void *disc_data,
 			count--;
 			continue;
 		case LL_WAKE_UP_ACK:
-			pr_debug("PM packet");
+			sp_pr_debug("PM packet\n");
 
 			spin_unlock_irqrestore(&st_gdata->lock, flags);
 			/* wake up ack received */
@@ -344,33 +346,28 @@ void st_int_recv(void *disc_data,
 			/* Unknow packet? */
 		default:
 			type = *ptr;
-
-			/* Default case means non-HCILL packets,
-			 * possibilities are packets for:
-			 * (a) valid protocol -  Supported Protocols within
-			 *     the ST_MAX_CHANNELS.
-			 * (b) registered protocol - Checked by
-			 *     "st_gdata->list[type] == NULL)" are supported
-			 *     protocols only.
-			 *  Rules out any invalid protocol and
-			 *  unregistered protocols with channel ID < 16.
-			 */
-
-			if ((type >= ST_MAX_CHANNELS) ||
-					(st_gdata->list[type] == NULL)) {
-				pr_err("chip/interface misbehavior "
-						"dropping frame starting "
-						"with 0x%02x", type);
+			if (type < ST_MAX_CHANNELS) {
+				if (!st_gdata->list[type]) {
+					pr_err("dropping frame "
+					"starting with 0x%02x\n", type);
+					goto done;
+				}
+			} else {
+				pr_err("Invalid packet type : 0x%02x\n", type);
 				goto done;
-			}
+			}  
 			st_gdata->rx_skb = alloc_skb(
 					st_gdata->list[type]->max_frame_size,
 					GFP_ATOMIC);
-			if (!st_gdata->rx_skb)
-				goto done;
 
+			if (st_gdata->rx_skb) {
 			skb_reserve(st_gdata->rx_skb,
 					st_gdata->list[type]->reserve);
+			} else {
+				pr_err("alloc_skb error\n");
+				goto done;
+			}
+
 			/* next 2 required for BT only */
 			st_gdata->rx_skb->cb[0] = type; /*pkt_type*/
 			st_gdata->rx_skb->cb[1] = 0; /*incoming*/
@@ -384,7 +381,7 @@ void st_int_recv(void *disc_data,
 	}
 done:
 	spin_unlock_irqrestore(&st_gdata->lock, flags);
-	pr_debug("done %s", __func__);
+	pr_debug("done %s\n", __func__);
 	return;
 }
 
@@ -398,7 +395,7 @@ struct sk_buff *st_int_dequeue(struct st_data_s *st_gdata)
 {
 	struct sk_buff *returning_skb;
 
-	pr_debug("%s", __func__);
+	pr_debug("%s\n", __func__);
 	if (st_gdata->tx_skb != NULL) {
 		returning_skb = st_gdata->tx_skb;
 		st_gdata->tx_skb = NULL;
@@ -420,12 +417,12 @@ void st_int_enqueue(struct st_data_s *st_gdata, struct sk_buff *skb)
 {
 	unsigned long flags = 0;
 
-	pr_debug("%s", __func__);
+	pr_debug("%s\n", __func__);
 	spin_lock_irqsave(&st_gdata->lock, flags);
 
 	switch (st_ll_getstate(st_gdata)) {
 	case ST_LL_AWAKE:
-		pr_debug("ST LL is AWAKE, sending normally");
+		pr_debug("ST LL is AWAKE, sending normally\n");
 		skb_queue_tail(&st_gdata->txq, skb);
 		break;
 	case ST_LL_ASLEEP_TO_AWAKE:
@@ -433,7 +430,7 @@ void st_int_enqueue(struct st_data_s *st_gdata, struct sk_buff *skb)
 		break;
 	case ST_LL_AWAKE_TO_ASLEEP:
 		pr_err("ST LL is illegal state(%ld),"
-			   "purging received skb.", st_ll_getstate(st_gdata));
+			   "purging received skb.\n", st_ll_getstate(st_gdata));
 		kfree_skb(skb);
 		break;
 	case ST_LL_ASLEEP:
@@ -442,13 +439,13 @@ void st_int_enqueue(struct st_data_s *st_gdata, struct sk_buff *skb)
 		break;
 	default:
 		pr_err("ST LL is illegal state(%ld),"
-			   "purging received skb.", st_ll_getstate(st_gdata));
+			   "purging received skb.\n", st_ll_getstate(st_gdata));
 		kfree_skb(skb);
 		break;
 	}
 
 	spin_unlock_irqrestore(&st_gdata->lock, flags);
-	pr_debug("done %s", __func__);
+	pr_debug("done %s\n", __func__);
 	return;
 }
 
@@ -462,10 +459,10 @@ void st_tx_wakeup(struct st_data_s *st_data)
 {
 	struct sk_buff *skb;
 	unsigned long flags;	/* for irq save flags */
-	pr_debug("%s", __func__);
+	pr_debug("%s\n", __func__);
 	/* check for sending & set flag sending here */
 	if (test_and_set_bit(ST_TX_SENDING, &st_data->tx_state)) {
-		pr_debug("ST already sending");
+		pr_debug("ST already sending\n");
 		/* keep sending */
 		set_bit(ST_TX_WAKEUP, &st_data->tx_state);
 		return;
@@ -506,10 +503,10 @@ void st_tx_wakeup(struct st_data_s *st_data)
 void kim_st_list_protocols(struct st_data_s *st_gdata, void *buf)
 {
 	seq_printf(buf, "[%d]\nBT=%c\nFM=%c\nGPS=%c\n",
-			st_gdata->protos_registered,
-			st_gdata->is_registered[0x04] == true ? 'R' : 'U',
-			st_gdata->is_registered[0x08] == true ? 'R' : 'U',
-			st_gdata->is_registered[0x09] == true ? 'R' : 'U');
+			   st_gdata->protos_registered,
+			   st_gdata->is_registered[0x04] == true ? 'R' : 'U',
+			   st_gdata->is_registered[0x08] == true ? 'R' : 'U',
+			   st_gdata->is_registered[0x09] == true ? 'R' : 'U');
 }
 
 /********************************************************************/
@@ -524,20 +521,19 @@ long st_register(struct st_proto_s *new_proto)
 	unsigned long flags = 0;
 
 	st_kim_ref(&st_gdata, 0);
-	pr_info("%s(%d) ", __func__, new_proto->chnl_id);
+	pr_info("%s(%d) \n", __func__, new_proto->chnl_id);
 	if (st_gdata == NULL || new_proto == NULL || new_proto->recv == NULL
 	    || new_proto->reg_complete_cb == NULL) {
-		pr_err("gdata/new_proto/recv or reg_complete_cb not ready");
+		pr_err("gdata/new_proto/recv or reg_complete_cb not ready\n");
 		return -EINVAL;
 	}
 
 	if (new_proto->chnl_id >= ST_MAX_CHANNELS) {
-		pr_err("chnl_id %d not supported", new_proto->chnl_id);
+		pr_err("chnl_id %d not supported\n", new_proto->chnl_id);
 		return -EPROTONOSUPPORT;
 	}
-
 	if (st_gdata->is_registered[new_proto->chnl_id] == true) {
-		pr_err("chnl_id %d already registered", new_proto->chnl_id);
+		pr_err("chnl_id %d already registered\n", new_proto->chnl_id);
 		return -EALREADY;
 	}
 
@@ -545,7 +541,7 @@ long st_register(struct st_proto_s *new_proto)
 	spin_lock_irqsave(&st_gdata->lock, flags);
 
 	if (test_bit(ST_REG_IN_PROGRESS, &st_gdata->st_state)) {
-		pr_info(" ST_REG_IN_PROGRESS:%d ", new_proto->chnl_id);
+		pr_info(" ST_REG_IN_PROGRESS:%d \n", new_proto->chnl_id);
 		/* fw download in progress */
 
 		add_channel_to_table(st_gdata, new_proto);
@@ -556,7 +552,7 @@ long st_register(struct st_proto_s *new_proto)
 		spin_unlock_irqrestore(&st_gdata->lock, flags);
 		return -EINPROGRESS;
 	} else if (st_gdata->protos_registered == ST_EMPTY) {
-		pr_info(" chnl_id list empty :%d ", new_proto->chnl_id);
+		pr_info(" chnl_id list empty :%d \n", new_proto->chnl_id);
 		set_bit(ST_REG_IN_PROGRESS, &st_gdata->st_state);
 		st_recv = st_kim_recv;
 
@@ -566,10 +562,6 @@ long st_register(struct st_proto_s *new_proto)
 		/* release lock previously held - re-locked below */
 		spin_unlock_irqrestore(&st_gdata->lock, flags);
 
-#ifdef CONFIG_ST_HOST_WAKE
-		/*Enable Voltage regulation*/
-		st_vltg_regulation(ST_VLTG_REG_ENABLE);
-#endif
 		/* this may take a while to complete
 		 * since it involves BT fw download
 		 */
@@ -578,21 +570,17 @@ long st_register(struct st_proto_s *new_proto)
 			clear_bit(ST_REG_IN_PROGRESS, &st_gdata->st_state);
 			if ((st_gdata->protos_registered != ST_EMPTY) &&
 			    (test_bit(ST_REG_PENDING, &st_gdata->st_state))) {
-				pr_err(" KIM failure complete callback ");
+				pr_err(" KIM failure complete callback \n");
 				st_reg_complete(st_gdata, err);
 				clear_bit(ST_REG_PENDING, &st_gdata->st_state);
 			}
-
-#ifdef CONFIG_ST_HOST_WAKE
-			/*Disable Voltage regulation*/
-			st_vltg_regulation(ST_VLTG_REG_DISABLE);
-#endif
 			return -EINVAL;
 		}
 
 		spin_lock_irqsave(&st_gdata->lock, flags);
 
 		clear_bit(ST_REG_IN_PROGRESS, &st_gdata->st_state);
+
 		st_recv = st_int_recv;
 
 		/* this is where all pending registration
@@ -600,7 +588,7 @@ long st_register(struct st_proto_s *new_proto)
 		 */
 		if ((st_gdata->protos_registered != ST_EMPTY) &&
 		    (test_bit(ST_REG_PENDING, &st_gdata->st_state))) {
-			pr_debug(" call reg complete callback ");
+			pr_debug(" call reg complete callback \n");
 			st_reg_complete(st_gdata, 0);
 		}
 		clear_bit(ST_REG_PENDING, &st_gdata->st_state);
@@ -609,7 +597,7 @@ long st_register(struct st_proto_s *new_proto)
 		 * since the above check is old
 		 */
 		if (st_gdata->is_registered[new_proto->chnl_id] == true) {
-			pr_err(" proto %d already registered ",
+			pr_err(" proto %d already registered \n",
 				   new_proto->chnl_id);
 			spin_unlock_irqrestore(&st_gdata->lock, flags);
 			return -EALREADY;
@@ -626,11 +614,12 @@ long st_register(struct st_proto_s *new_proto)
 		add_channel_to_table(st_gdata, new_proto);
 		st_gdata->protos_registered++;
 		new_proto->write = st_write;
+
 		/* lock already held before entering else */
 		spin_unlock_irqrestore(&st_gdata->lock, flags);
 		return err;
 	}
-	pr_debug("done %s(%d) ", __func__, new_proto->chnl_id);
+	pr_debug("done %s(%d) \n", __func__, new_proto->chnl_id);
 }
 EXPORT_SYMBOL_GPL(st_register);
 
@@ -643,18 +632,18 @@ long st_unregister(struct st_proto_s *proto)
 	unsigned long flags = 0;
 	struct st_data_s	*st_gdata;
 
-	pr_debug("%s: %d ", __func__, proto->chnl_id);
+	pr_debug("%s: %d \n", __func__, proto->chnl_id);
 
 	st_kim_ref(&st_gdata, 0);
 	if (!st_gdata || proto->chnl_id >= ST_MAX_CHANNELS) {
-		pr_err(" chnl_id %d not supported", proto->chnl_id);
+		pr_err(" chnl_id %d not supported\n", proto->chnl_id);
 		return -EPROTONOSUPPORT;
 	}
 
 	spin_lock_irqsave(&st_gdata->lock, flags);
 
 	if (st_gdata->is_registered[proto->chnl_id] == false) {
-		pr_err(" chnl_id %d not registered", proto->chnl_id);
+		sp_pr_err(" chnl_id %d not registered\n", proto->chnl_id);
 		spin_unlock_irqrestore(&st_gdata->lock, flags);
 		return -EPROTONOSUPPORT;
 	}
@@ -669,7 +658,8 @@ long st_unregister(struct st_proto_s *proto)
 
 	if ((st_gdata->protos_registered == ST_EMPTY) &&
 	    (!test_bit(ST_REG_PENDING, &st_gdata->st_state))) {
-		pr_info(" all chnl_ids unregistered ");
+		sp_pr_info(" all chnl_ids unregistered \n");
+
 		/* stop traffic on tty */
 		if (st_gdata->tty) {
 			tty_ldisc_flush(st_gdata->tty);
@@ -679,10 +669,6 @@ long st_unregister(struct st_proto_s *proto)
 		/* all chnl_ids now unregistered */
 		st_kim_stop(st_gdata->kim_data);
 
-#ifdef CONFIG_ST_HOST_WAKE
-		/*Disable Voltage regulation*/
-		st_vltg_regulation(ST_VLTG_REG_DISABLE);
-#endif
 		/* disable ST LL */
 		st_ll_disable(st_gdata);
 	}
@@ -701,11 +687,12 @@ long st_write(struct sk_buff *skb)
 	st_kim_ref(&st_gdata, 0);
 	if (unlikely(skb == NULL || st_gdata == NULL
 		|| st_gdata->tty == NULL)) {
-		pr_err("data/tty unavailable to perform write");
+		pr_err("data/tty unavailable to perform write\n");
 		return -EINVAL;
 	}
-
-	pr_debug("%d to be written", skb->len);
+	pr_debug("%d to be written\n", skb->len);
+	//pr_data_cn_start("EDR", 42800, "uA");
+	//pr_data_cn_end("EDR", skb->len);
 	len = skb->len;
 
 	/* st_ll to decide where to enqueue the skb */
@@ -728,7 +715,7 @@ static int st_tty_open(struct tty_struct *tty)
 {
 	int err = 0;
 	struct st_data_s *st_gdata;
-	pr_info("%s ", __func__);
+	pr_info("%s \n", __func__);
 
 	st_kim_ref(&st_gdata, 0);
 	st_gdata->tty = tty;
@@ -748,7 +735,7 @@ static int st_tty_open(struct tty_struct *tty)
 	 * installation of N_TI_WL ldisc is complete
 	 */
 	st_kim_complete(st_gdata->kim_data);
-	pr_debug("done %s", __func__);
+	pr_debug("done %s\n", __func__);
 	return err;
 }
 
@@ -758,7 +745,7 @@ static void st_tty_close(struct tty_struct *tty)
 	unsigned long flags = 0;
 	struct	st_data_s *st_gdata = tty->disc_data;
 
-	pr_info("%s ", __func__);
+	pr_info("%s \n", __func__);
 
 	/* TODO:
 	 * if a protocol has been registered & line discipline
@@ -767,7 +754,7 @@ static void st_tty_close(struct tty_struct *tty)
 	spin_lock_irqsave(&st_gdata->lock, flags);
 	for (i = ST_BT; i < ST_MAX_CHANNELS; i++) {
 		if (st_gdata->is_registered[i] == true)
-			pr_err("%d not un-registered", i);
+			sp_pr_err("%d not un-registered\n", i);
 		st_gdata->list[i] = NULL;
 		st_gdata->is_registered[i] = false;
 	}
@@ -794,7 +781,7 @@ static void st_tty_close(struct tty_struct *tty)
 	st_gdata->rx_skb = NULL;
 	spin_unlock_irqrestore(&st_gdata->lock, flags);
 
-	pr_debug("%s: done ", __func__);
+	pr_debug("%s: done \n", __func__);
 }
 
 static void st_tty_receive(struct tty_struct *tty, const unsigned char *data,
@@ -810,7 +797,7 @@ static void st_tty_receive(struct tty_struct *tty, const unsigned char *data,
 	 * to KIM for validation
 	 */
 	st_recv(tty->disc_data, data, count);
-	pr_debug("done %s", __func__);
+	pr_debug("done %s\n", __func__);
 }
 
 /* wake-up function called in from the TTY layer
@@ -819,7 +806,7 @@ static void st_tty_receive(struct tty_struct *tty, const unsigned char *data,
 static void st_tty_wakeup(struct tty_struct *tty)
 {
 	struct	st_data_s *st_gdata = tty->disc_data;
-	pr_debug("%s ", __func__);
+	pr_debug("%s \n", __func__);
 	/* don't do an wakeup for now */
 	clear_bit(TTY_DO_WRITE_WAKEUP, &tty->flags);
 
@@ -830,7 +817,7 @@ static void st_tty_wakeup(struct tty_struct *tty)
 static void st_tty_flush_buffer(struct tty_struct *tty)
 {
 	struct	st_data_s *st_gdata = tty->disc_data;
-	pr_debug("%s ", __func__);
+	pr_debug("%s \n", __func__);
 
 	kfree_skb(st_gdata->tx_skb);
 	st_gdata->tx_skb = NULL;
@@ -858,18 +845,18 @@ int st_core_init(struct st_data_s **core_data)
 
 	err = tty_register_ldisc(N_TI_WL, &st_ldisc_ops);
 	if (err) {
-		pr_err("error registering %d line discipline %ld",
+		pr_err("error registering %d line discipline %ld\n",
 			   N_TI_WL, err);
 		return err;
 	}
-	pr_debug("registered n_shared line discipline");
+	pr_debug("registered n_shared line discipline\n");
 
 	st_gdata = kzalloc(sizeof(struct st_data_s), GFP_KERNEL);
 	if (!st_gdata) {
-		pr_err("memory allocation failed");
+		pr_err("memory allocation failed\n");
 		err = tty_unregister_ldisc(N_TI_WL);
 		if (err)
-			pr_err("unable to un-register ldisc %ld", err);
+			pr_err("unable to un-register ldisc %ld\n", err);
 		err = -ENOMEM;
 		return err;
 	}
@@ -885,11 +872,11 @@ int st_core_init(struct st_data_s **core_data)
 
 	err = st_ll_init(st_gdata);
 	if (err) {
-		pr_err("error during st_ll initialization(%ld)", err);
+		pr_err("error during st_ll initialization(%ld)\n", err);
 		kfree(st_gdata);
 		err = tty_unregister_ldisc(N_TI_WL);
 		if (err)
-			pr_err("unable to un-register ldisc");
+			pr_err("unable to un-register ldisc\n");
 		return err;
 	}
 	*core_data = st_gdata;
@@ -902,7 +889,7 @@ void st_core_exit(struct st_data_s *st_gdata)
 	/* internal module cleanup */
 	err = st_ll_deinit(st_gdata);
 	if (err)
-		pr_err("error during deinit of ST LL %ld", err);
+		pr_err("error during deinit of ST LL %ld\n", err);
 
 	if (st_gdata != NULL) {
 		/* Free ST Tx Qs and skbs */
@@ -913,7 +900,7 @@ void st_core_exit(struct st_data_s *st_gdata)
 		/* TTY ldisc cleanup */
 		err = tty_unregister_ldisc(N_TI_WL);
 		if (err)
-			pr_err("unable to un-register ldisc %ld", err);
+			pr_err("unable to un-register ldisc %ld\n", err);
 		/* free the global data pointer */
 		kfree(st_gdata);
 	}

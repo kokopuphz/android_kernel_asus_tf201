@@ -42,6 +42,7 @@ static struct cpufreq_driver *cpufreq_driver;
 static DEFINE_PER_CPU(struct cpufreq_policy *, cpufreq_cpu_data);
 #ifdef CONFIG_HOTPLUG_CPU
 /* This one keeps track of the previously set governor of a removed CPU */
+/* TODO: Also remember the scaling maximum and minimum frequencies. */
 static DEFINE_PER_CPU(char[CPUFREQ_NAME_LEN], cpufreq_cpu_governor);
 #endif
 static DEFINE_SPINLOCK(cpufreq_driver_lock);
@@ -643,12 +644,70 @@ no_policy:
 	return ret;
 }
 
+#ifdef CONFIG_SMP
+static ssize_t store_all_cpus(struct freq_attr *fattr,
+			      const char* buf, size_t count)
+{
+	struct cpufreq_policy *policy;
+	ssize_t ret = 0;
+	int cpu;
+
+	for_each_present_cpu(cpu) {
+		policy = cpufreq_cpu_get(cpu);
+		if (!policy) {
+			/* Check for the case where we are setting the scaling
+			   governor but the CPU is offline. Since we are SMP,
+			   all CPUs must have the same governor. So we need to
+			   update the cache. */
+			if (fattr == &scaling_governor && !cpu_online(cpu)) {
+				strncpy(per_cpu(cpufreq_cpu_governor, cpu),
+					buf, CPUFREQ_NAME_LEN);
+			}
+
+			continue;
+		}
+
+		if (lock_policy_rwsem_write(policy->cpu) < 0)
+			goto fail;
+
+		if (fattr->store)
+			ret = fattr->store(policy, buf, count);
+		else
+			ret = -EIO;
+
+		unlock_policy_rwsem_write(policy->cpu);
+
+	fail:
+		cpufreq_cpu_put(policy);
+
+		if (ret < 0)
+			break;
+	}
+
+	return ret;
+}
+#endif
+
 static ssize_t store(struct kobject *kobj, struct attribute *attr,
 		     const char *buf, size_t count)
 {
 	struct cpufreq_policy *policy = to_policy(kobj);
 	struct freq_attr *fattr = to_attr(attr);
 	ssize_t ret = -EINVAL;
+
+#ifdef CONFIG_SMP
+	/* These attributes need to apply to ALL CPUs when we are compiled with SMP. */
+	if (
+		fattr == &scaling_min_freq ||
+		fattr == &scaling_max_freq ||
+		fattr == &scaling_governor ||
+		fattr == &scaling_setspeed
+	) {
+		ret = store_all_cpus(fattr, buf, count);
+		return ret;
+	}
+#endif
+
 	policy = cpufreq_cpu_get(policy->cpu);
 	if (!policy)
 		goto no_policy;

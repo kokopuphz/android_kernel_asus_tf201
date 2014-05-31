@@ -166,6 +166,10 @@ int max77663_set_bits(struct device *dev, u8 addr, u8 mask, u8 value,
 		      bool is_rtc);
 int max77663_gpio_set_alternate(int gpio, int alternate);
 int max77663_read_chip_version(struct device *dev, u8 *val);
+#ifdef CONFIG_MACH_X3
+int max77663_set_ScratchRegister(u8 bit);
+int max77663_power_rst_wkup(int on);
+#endif
 #else
 static inline int max77663_read(struct device *dev, u8 addr, void *values,
 				u32 len, bool is_rtc)

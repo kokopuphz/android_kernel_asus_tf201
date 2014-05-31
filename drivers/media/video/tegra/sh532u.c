@@ -85,6 +85,7 @@
  */
 
 
+#include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/i2c.h>
 #include <linux/miscdevice.h>
@@ -94,9 +95,6 @@
 #include <linux/list.h>
 #include <linux/jiffies.h>
 #include <linux/gpio.h>
-#include <linux/module.h>
-
-#include <media/nvc.h>
 #include <media/sh532u.h>
 
 #define SH532U_ID		0x0532
@@ -116,9 +114,7 @@
 #define SH532U_TIMEOUT_MS	200
 #define SH532U_POS_LOW_DEFAULT	0xA000
 #define SH532U_POS_HIGH_DEFAULT	0x6000
-#define SH532U_SLEW_RATE			1
-#define SH532U_POS_TRANSLATE		0
-#define SH532U_POS_SIGN_CHANGER		(-1)
+
 
 static u8 sh532u_ids[] = {
 	0xF0,
@@ -153,7 +149,6 @@ struct sh532u_info {
 	unsigned i2c_addr_rom;
 	struct nvc_focus_nvc nvc;
 	struct nvc_focus_cap cap;
-	struct nv_focuser_config config;
 	enum nvc_focus_sts sts;
 	struct sh532u_pdata_info cfg;
 	bool reset_flag;
@@ -178,8 +173,6 @@ static struct nvc_focus_cap sh532u_default_cap = {
 	.focus_macro	= SH532U_FOCUS_MACRO,
 	.focus_hyper	= SH532U_FOCUS_HYPER,
 	.focus_infinity	= SH532U_FOCUS_INFINITY,
-	.slew_rate	  = SH532U_SLEW_RATE,
-	.position_translate = SH532U_POS_TRANSLATE,
 };
 
 static struct nvc_focus_nvc sh532u_default_nvc = {
@@ -389,7 +382,7 @@ static void sh532u_gpio_exit(struct sh532u_info *info)
 {
 	unsigned i;
 
-	for (i = 0; i < ARRAY_SIZE(sh532u_gpios); i++) {
+	for (i = 0; i < ARRAY_SIZE(info->gpio); i++) {
 		if (info->gpio[i].flag && info->gpio[i].own) {
 			gpio_free(info->gpio[i].gpio);
 			info->gpio[i].own = false;
@@ -406,12 +399,12 @@ static void sh532u_gpio_init(struct sh532u_info *info)
 	unsigned j;
 	int err;
 
-	for (i = 0; i < ARRAY_SIZE(sh532u_gpios); i++)
+	for (i = 0; i < ARRAY_SIZE(info->gpio); i++)
 		info->gpio[i].flag = false;
 	if (!info->pdata->gpio_count || !info->pdata->gpio)
 		return;
 
-	for (i = 0; i < ARRAY_SIZE(sh532u_gpios); i++) {
+	for (i = 0; i < ARRAY_SIZE(info->gpio); i++) {
 		type = sh532u_gpios[i].gpio_type;
 		for (j = 0; j < info->pdata->gpio_count; j++) {
 			if (type == info->pdata->gpio[j].gpio_type)
@@ -540,7 +533,7 @@ static int sh532u_vreg_init(struct sh532u_info *info)
 			else
 				dev_info(&info->i2c_client->dev,
 					 "%s no regulator found for %s. "
-					 "This board may not have an "
+					 "This board may not have an"
 					 "independent %s regulator.\n",
 					 __func__, info->vreg[j].vreg_name,
 					 info->vreg[j].vreg_name);
@@ -715,7 +708,7 @@ static int sh532u_dev_id(struct sh532u_info *info)
 static void sh532u_sts_rd(struct sh532u_info *info)
 {
 	u8 us_tmp;
-	u16 us_smv_fin;
+	u16 us_smv_fin = 0;
 	int err;
 
 	if (info->sts == NVC_FOCUS_STS_INITIALIZING)
@@ -744,31 +737,22 @@ static void sh532u_sts_rd(struct sh532u_info *info)
 	}
 }
 
-static s16 sh532u_rel2abs(struct sh532u_info *info, s32 rel_position)
+static s16 sh532u_rel2abs(struct sh532u_info *info, u32 rel_position)
 {
 	s16 abs_pos;
 
 	if (rel_position > info->cap.actuator_range)
 		rel_position = info->cap.actuator_range;
-	if (info->cap.position_translate)  {
-		rel_position = info->cap.actuator_range - rel_position;
-		if (rel_position) {
-			rel_position *= info->abs_range;
-			rel_position /= info->cap.actuator_range;
-		}
-		abs_pos = (s16)(info->abs_base + rel_position);
-	} else {
-		abs_pos = rel_position * SH532U_POS_SIGN_CHANGER;
+	rel_position = info->cap.actuator_range - rel_position;
+	if (rel_position) {
+		rel_position *= info->abs_range;
+		rel_position /= info->cap.actuator_range;
 	}
-
+	abs_pos = (s16)(info->abs_base + rel_position);
 	if (abs_pos < info->cfg.limit_low)
 		abs_pos = info->cfg.limit_low;
 	if (abs_pos > info->cfg.limit_high)
 		abs_pos = info->cfg.limit_high;
-
-	dev_dbg(&info->i2c_client->dev, "%s: rel_position %d returning abs_pos %d\n",
-			__func__, rel_position, abs_pos);
-
 	return abs_pos;
 }
 
@@ -780,21 +764,12 @@ static u32 sh532u_abs2rel(struct sh532u_info *info, s16 abs_position)
 		abs_position = info->cfg.limit_high;
 	if (abs_position < info->abs_base)
 		abs_position = info->abs_base;
-
-	if (info->cap.position_translate) {
-		rel_pos = (u32)(abs_position - info->abs_base);
-		rel_pos *= info->cap.actuator_range;
-		rel_pos /= info->abs_range;
-
-		if (rel_pos > info->cap.actuator_range)
-			rel_pos = info->cap.actuator_range;
-		rel_pos = info->cap.actuator_range - rel_pos;
-	} else {
-		rel_pos = abs_position * SH532U_POS_SIGN_CHANGER;
-	}
-	dev_dbg(&info->i2c_client->dev, "%s: abs_position %d returning rel_pos %d",
-			__func__, abs_position, rel_pos);
-
+	rel_pos = (u32)(abs_position - info->abs_base);
+	rel_pos *= info->cap.actuator_range;
+	rel_pos /= info->abs_range;
+	if (rel_pos > info->cap.actuator_range)
+		rel_pos = info->cap.actuator_range;
+	rel_pos = info->cap.actuator_range - rel_pos;
 	return rel_pos;
 }
 
@@ -808,7 +783,7 @@ static int sh532u_abs_pos_rd(struct sh532u_info *info, s16 *position)
 	return err;
 }
 
-static int sh532u_rel_pos_rd(struct sh532u_info *info, s32 *position)
+static int sh532u_rel_pos_rd(struct sh532u_info *info, u32 *position)
 {
 	s16 abs_pos;
 	long msec;
@@ -837,11 +812,9 @@ static int sh532u_rel_pos_rd(struct sh532u_info *info, s32 *position)
 				pos = (int)info->pos_rel;
 		}
 	}
-	if (info->cap.position_translate) {
-		if (pos < 0)
-			pos = 0;
-	}
-	*position = pos;
+	if (pos < 0)
+		pos = 0;
+	*position = (u32)pos;
 	return 0;
 }
 
@@ -879,8 +852,6 @@ static void sh532u_calibration_caps(struct sh532u_info *info)
 	rel_hi = info->cap.focus_infinity;
 	info->abs_range = (u32)(info->cfg.pos_high - info->cfg.pos_low);
 	loop_limit = (rel_lo > rel_hi) ? rel_lo : rel_hi;
-	dev_dbg(&info->i2c_client->dev, "%s: rel_lo %d rel_hi %d loop_limit %d\n",
-				__func__, rel_lo, rel_hi, loop_limit);
 	for (i = 0; i <= loop_limit; i++) {
 		rel_range = info->cap.actuator_range - (rel_lo + rel_hi);
 		step = info->abs_range / rel_range;
@@ -898,36 +869,22 @@ static void sh532u_calibration_caps(struct sh532u_info *info)
 					abs_top <= info->cfg.limit_high)
 			break;
 	}
-	dev_dbg(&info->i2c_client->dev, "%s: info->abs_range %d abs_base %d abs_top %d\n",
-			__func__, info->abs_range, info->abs_base, abs_top);
-
-	if (!info->cap.position_translate && info->abs_range)
-		info->cap.actuator_range = info->abs_range;
-
 	info->cap.focus_hyper = info->abs_range;
 	info->abs_range = (u32)(abs_top - info->abs_base);
 	/* calculate absolute hyperfocus position */
 	info->cap.focus_hyper *= info->cfg.focus_hyper_ratio;
 	info->cap.focus_hyper /= info->cfg.focus_hyper_div;
 	abs_top = (s16)(info->cfg.pos_high - info->cap.focus_hyper);
-
 	/* update actual relative positions */
 	info->cap.focus_hyper = sh532u_abs2rel(info, abs_top);
-	dev_dbg(&info->i2c_client->dev, "%s: focus_hyper abs %d rel %d\n",
-			__func__, abs_top, info->cap.focus_hyper);
-
 	info->cap.focus_infinity = sh532u_abs2rel(info, info->cfg.pos_high);
-	dev_dbg(&info->i2c_client->dev, "%s: focus_infinity abs %d rel %d\n",
-			__func__, info->cfg.pos_high, info->cap.focus_infinity);
-
 	info->cap.focus_macro = sh532u_abs2rel(info, info->cfg.pos_low);
-	dev_dbg(&info->i2c_client->dev, "%s: focus_macro abs %d rel %d\n",
-			__func__, info->cfg.pos_low, info->cap.focus_macro);
-
-	dev_dbg(&info->i2c_client->dev, "%s: Version %d actuator_range %d "
-			"settle_time %d position_traslate %d\n",
-			__func__, info->cap.version, info->cap.actuator_range,
-			info->cap.settle_time, info->cap.position_translate);
+	dev_dbg(&info->i2c_client->dev, "%s focus_macro=%u\n",
+		__func__, info->cap.focus_macro);
+	dev_dbg(&info->i2c_client->dev, "%s focus_infinity=%u\n",
+		__func__, info->cap.focus_infinity);
+	dev_dbg(&info->i2c_client->dev, "%s focus_hyper=%u\n",
+		__func__, info->cap.focus_hyper);
 }
 
 static int sh532u_calibration(struct sh532u_info *info, bool use_defaults)
@@ -936,11 +893,8 @@ static int sh532u_calibration(struct sh532u_info *info, bool use_defaults)
 	int err;
 	int ret = 0;
 
-	if (info->init_cal_flag) {
-		dev_dbg(&info->i2c_client->dev, "%s: Already initialized"
-				"Returning\n", __func__);
+	if (info->init_cal_flag)
 		return 0;
-	}
 
 	/*
 	 * Get Inf1, Mac1
@@ -1012,9 +966,8 @@ static int sh532u_calibration(struct sh532u_info *info, bool use_defaults)
 	 *  1     PASS  PASS   Continue to calculations
 	 */
 	/* err = DATA where FAIL = 1 */
-	if (!info->cfg.pos_low || info->cfg.pos_high <= info->cfg.pos_low ||
-		!info->cfg.limit_low ||
-		info->cfg.limit_high <= info->cfg.limit_low)
+	if (!info->cfg.pos_low || !info->cfg.pos_high ||
+			!info->cfg.limit_low || !info->cfg.limit_high)
 		err = 1;
 	else
 		err = 0;
@@ -1046,7 +999,6 @@ static int sh532u_calibration(struct sh532u_info *info, bool use_defaults)
 		__func__, (int)info->cfg.limit_low);
 	dev_dbg(&info->i2c_client->dev, "%s limit_high=%d\n",
 		__func__, (int)info->cfg.limit_high);
-
 	sh532u_calibration_caps(info);
 	info->init_cal_flag = 1;
 	dev_dbg(&info->i2c_client->dev, "%s complete\n", __func__);
@@ -1100,7 +1052,7 @@ static int sh532u_hvca_wr2(struct sh532u_info *info, u8 ep_type,
 {
 	u8 uc_data1;
 	u8 uc_data2;
-	u16 us_data;
+	u16 us_data = 0;
 	int err = 0;
 
 	switch (ep_type & 0xF0) {
@@ -1264,13 +1216,12 @@ static int sh532u_pos_abs_wr(struct sh532u_info *info, s16 tar_pos)
 				       STMLFF_OFF |
 				       STMVEN_ON));
 	}
-	dev_dbg(&info->i2c_client->dev, "%s: position %d\n", __func__, tar_pos);
 	return err;
 }
 
 static int sh532u_move_wait(struct sh532u_info *info)
 {
-	u16 us_smv_fin;
+	u16 us_smv_fin = 0;
 	u8 moveTime;
 	u8 ucParMod;
 	u8 tmp;
@@ -1339,124 +1290,21 @@ static int sh532u_hvca_pos_init(struct sh532u_info *info)
 	return err;
 }
 
-static int sh532u_pos_rel_wr(struct sh532u_info *info, s32 position)
+static int sh532u_pos_rel_wr(struct sh532u_info *info, u32 position)
 {
 	s16 abs_pos;
 
-	if (info->cap.position_translate) {
-		if (position > info->cap.actuator_range) {
-			dev_err(&info->i2c_client->dev, "%s invalid position %d\n",
-				__func__, position);
-			return -EINVAL;
-		}
+	if (position > info->cap.actuator_range) {
+		dev_err(&info->i2c_client->dev, "%s invalid position %u\n",
+			__func__, position);
+		return -EINVAL;
 	}
-	abs_pos = sh532u_rel2abs(info, position);
 
+	abs_pos = sh532u_rel2abs(info, position);
 	info->pos_rel = position;
 	info->pos_abs = abs_pos;
 	info->pos_time_wr = jiffies;
 	return sh532u_pos_abs_wr(info, abs_pos);
-}
-
-static void sh532u_get_focuser_capabilities(struct sh532u_info *info)
-{
-	memset(&info->config, 0, sizeof(info->config));
-
-	info->config.focal_length = info->nvc.focal_length;
-	info->config.fnumber = info->nvc.fnumber;
-	info->config.max_aperture = info->nvc.fnumber;
-	info->config.range_ends_reversed = (SH532U_POS_SIGN_CHANGER == -1)
-								? 1 : 0;
-	/*
-	 * We do not use pos_working_low and pos_working_high
-	 * in the kernel driver. It is OK to set them to invalid
-	 * as the caller will reconstruct them from
-	 * focuser_set[0].inf and focuser_set[0].macro
-	 */
-	info->config.pos_working_low = AF_POS_INVALID_VALUE;
-	info->config.pos_working_high = AF_POS_INVALID_VALUE;
-
-	info->config.pos_actual_low = info->cfg.limit_high *
-							SH532U_POS_SIGN_CHANGER;
-	info->config.pos_actual_high = info->cfg.limit_low *
-							SH532U_POS_SIGN_CHANGER;
-	info->config.slew_rate = info->cap.slew_rate;
-	info->config.circle_of_confusion = -1;
-
-	/*
-	 * These need to be passed up once we have the EEPROM/OTP read
-	 * routines in teh kernel. These need to be passed up much earlier on.
-	 * Till we have these routines, we pass them up as part of the get call.
-	 */
-	info->config.num_focuser_sets = 1;
-	info->config.focuser_set[0].posture = 's';
-	info->config.focuser_set[0].macro = info->cap.focus_macro;
-	info->config.focuser_set[0].hyper = info->cap.focus_hyper;
-	info->config.focuser_set[0].inf = info->cap.focus_infinity;
-	info->config.focuser_set[0].hysteresis = INT_MAX;
-	info->config.focuser_set[0].settle_time = info->cap.settle_time;
-	info->config.focuser_set[0].num_dist_pairs = 0;
-
-	dev_dbg(&info->i2c_client->dev, "%s: pos_actual_low %d pos_actual_high %d "
-		" settle_time %d\n", __func__, info->config.pos_actual_low,
-		info->config.pos_actual_high, info->cap.settle_time);
-
-}
-
-
-static int sh532u_set_focuser_capabilities(struct sh532u_info *info,
-					struct nvc_param *params)
-{
-	static struct nv_focuser_config config;
-
-	/* backup the current contents of dev->focuser_info->config for
-	 * selective restore later on */
-	memcpy(&config, &info->config,
-		sizeof(struct nv_focuser_config));
-
-	if (copy_from_user(&info->config, (const void __user *)params->p_value,
-		params->sizeofvalue)) {
-		dev_err(&info->i2c_client->dev, "%s Error: copy_from_user bytes %d\n",
-				__func__, params->sizeofvalue);
-		return -EFAULT;
-	}
-
-	/* Now do selectively restore members that are overwriten */
-
-	/* Unconditionally restore actual low and high positions */
-	info->config.pos_actual_low = config.pos_actual_low;
-	info->config.pos_actual_high = config.pos_actual_high;
-
-	if (info->config.pos_working_low == AF_POS_INVALID_VALUE)
-		info->config.pos_working_low = config.pos_working_low;
-
-	if (info->config.pos_working_high == AF_POS_INVALID_VALUE)
-		info->config.pos_working_high = config.pos_working_high;
-
-	if (info->config.slew_rate == INT_MAX)
-		info->config.slew_rate = config.slew_rate;
-	info->cap.slew_rate = info->config.slew_rate;
-
-	if (info->config.focuser_set[0].settle_time  == INT_MAX)
-		info->config.focuser_set[0].settle_time =
-					config.focuser_set[0].settle_time;
-	info->cap.settle_time = info->config.focuser_set[0].settle_time;
-
-	if (info->config.focuser_set[0].macro == AF_POS_INVALID_VALUE)
-		info->config.focuser_set[0].macro = config.focuser_set[0].macro;
-	info->cap.focus_macro = info->config.focuser_set[0].macro;
-
-	if (info->config.focuser_set[0].hyper == AF_POS_INVALID_VALUE)
-		info->config.focuser_set[0].hyper = config.focuser_set[0].hyper;
-	info->cap.focus_hyper = info->config.focuser_set[0].hyper;
-
-	if (info->config.focuser_set[0].inf == AF_POS_INVALID_VALUE)
-		info->config.focuser_set[0].inf = config.focuser_set[0].inf;
-	info->cap.focus_infinity = info->config.focuser_set[0].inf;
-
-	dev_dbg(&info->i2c_client->dev, "%s: copy_from_user bytes %d\n",
-			__func__,  params->sizeofvalue);
-	return 0;
 }
 
 
@@ -1465,7 +1313,7 @@ static int sh532u_param_rd(struct sh532u_info *info, unsigned long arg)
 	struct nvc_param params;
 	const void *data_ptr;
 	u32 data_size = 0;
-	s32 position;
+	u32 position;
 	int err;
 
 	if (copy_from_user(&params,
@@ -1519,14 +1367,16 @@ static int sh532u_param_rd(struct sh532u_info *info, unsigned long arg)
 		sh532u_pm_dev_wr(info, NVC_PWR_STDBY);
 		if (err)
 			return -EIO;
-		dev_dbg(&info->i2c_client->dev, "%s: NVC_PARAM_CAPS: params.param %d "
-				"params.sizeofvalue %d\n",
-				__func__, params.param, params.sizeofvalue);
 
-		sh532u_get_focuser_capabilities(info);
-
-		data_ptr = &info->config;
-		data_size = params.sizeofvalue;
+		data_ptr = &info->cap;
+		/* there are different sizes depending on the version */
+		/* send back just what's requested or our max size */
+		if (params.sizeofvalue < sizeof(info->cap))
+			data_size = params.sizeofvalue;
+		else
+			data_size = sizeof(info->cap);
+		dev_dbg(&info->i2c_client->dev, "%s CAPS\n",
+			__func__);
 		break;
 
 	case NVC_PARAM_STS:
@@ -1572,15 +1422,16 @@ static int sh532u_param_wr_s(struct sh532u_info *info,
 			     struct nvc_param *params,
 			     u32 u32val)
 {
+	struct nvc_focus_cap cap;
 	u8 u8val;
 	int err;
 
 	u8val = (u8)u32val;
 	switch (params->param) {
 	case NVC_PARAM_LOCUS:
-		dev_dbg(&info->i2c_client->dev, "%s LOCUS: %d\n",
-			__func__, (s32) u32val);
-		err = sh532u_pos_rel_wr(info, (s32) u32val);
+		dev_dbg(&info->i2c_client->dev, "%s LOCUS: %u\n",
+			__func__, u32val);
+		err = sh532u_pos_rel_wr(info, u32val);
 		return err;
 
 	case NVC_PARAM_RESET:
@@ -1596,9 +1447,27 @@ static int sh532u_param_wr_s(struct sh532u_info *info,
 		return err;
 
 	case NVC_PARAM_CAPS:
-		dev_dbg(&info->i2c_client->dev, "%s CAPS. Error. sh532u_param_wr "
-				"should be called instead\n", __func__);
-		return -EFAULT;
+		dev_dbg(&info->i2c_client->dev, "%s CAPS\n",
+			__func__);
+		if (copy_from_user(&cap, (const void __user *)params->p_value,
+				   sizeof(params->sizeofvalue))) {
+			dev_err(&info->i2c_client->dev, "%s %d copy_from_user err\n",
+				__func__, __LINE__);
+			return -EFAULT;
+		}
+
+		if (!cap.version)
+			return -EINVAL;
+
+		if (cap.version >= NVC_FOCUS_CAP_VER1)
+			info->cap.actuator_range = cap.actuator_range;
+		if (cap.version >= NVC_FOCUS_CAP_VER2) {
+			info->cap.focus_macro = cap.focus_macro;
+			info->cap.focus_hyper = cap.focus_hyper;
+			info->cap.focus_infinity = cap.focus_infinity;
+		}
+		sh532u_calibration_caps(info);
+		return 0;
 
 	default:
 		dev_dbg(&info->i2c_client->dev,
@@ -1706,14 +1575,6 @@ static int sh532u_param_wr(struct sh532u_info *info, unsigned long arg)
 			return 0;
 
 		return err;
-
-	case NVC_PARAM_CAPS:
-		if (sh532u_set_focuser_capabilities(info, &params)) {
-			dev_err(&info->i2c_client->dev, "%s: Error: copy_from_user bytes %d\n",
-					__func__, params.sizeofvalue);
-			return -EFAULT;
-		}
-		return 0;
 
 	default:
 	/* parameters dependent on sync mode */
@@ -1969,6 +1830,7 @@ static int sh532u_probe(
 	char dname[16];
 	int err;
 
+	dev_dbg(&client->dev, "%s\n", __func__);
 	info = devm_kzalloc(&client->dev, sizeof(*info), GFP_KERNEL);
 	if (info == NULL) {
 		dev_err(&client->dev, "%s: kzalloc error\n", __func__);

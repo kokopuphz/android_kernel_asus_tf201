@@ -57,3 +57,16 @@ CFLAGS_tegra_bpc_mgmt.o		= -Werror
 obj-$(CONFIG_TEGRA_BPC_MGMT)	+= tegra_bpc_mgmt.o
 obj-$(CONFIG_CHARGER_SMB347)	+= smb347-charger.o
 obj-$(CONFIG_BATTERY_ANDROID)	+= android_battery.o
+
+obj-$(CONFIG_CHARGER_TPS65200)	+= tps65200.o
+obj-$(CONFIG_ADC_TPS80032)	+= tps80032_adc.o
+obj-$(CONFIG_VSYS_ALARM_TPS80032) += tps80032_vsys_alarm.o
+obj-$(CONFIG_GAUGE_TPS80032)	+= tps80032_gauge.o
+obj-$(CONFIG_CHARGER_TPS80032)	+= tps80032_charger.o
+
+
+
+# EternityProject: LGE X3 Support
+obj-$(CONFIG_BATTERY_MAX17043)	+= max17043_fuelgauge.o
+obj-$(CONFIG_MAX8971_CHARGER)   += max8971-charger.o
+obj-$(CONFIG_LGE_BATTERY)	+= lge_battery.o

@@ -145,6 +145,7 @@ static void tick_nohz_update_jiffies(ktime_t now)
 	tick_do_update_jiffies64(now);
 	local_irq_restore(flags);
 
+	calc_load_exit_idle();
 	touch_softlockup_watchdog();
 }
 
@@ -217,7 +218,7 @@ u64 get_cpu_idle_time_us(int cpu, u64 *last_update_time)
 		update_ts_time_stats(cpu, ts, now, last_update_time);
 		idle = ts->idle_sleeptime;
 	} else {
-		if (cpu_online(cpu) && ts->idle_active && !nr_iowait_cpu(cpu)) {
+		if (ts->idle_active && !nr_iowait_cpu(cpu)) {
 			ktime_t delta = ktime_sub(now, ts->idle_entrytime);
 
 			idle = ktime_add(ts->idle_sleeptime, delta);
@@ -248,19 +249,20 @@ EXPORT_SYMBOL_GPL(get_cpu_idle_time_us);
 u64 get_cpu_iowait_time_us(int cpu, u64 *last_update_time)
 {
 	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
-	ktime_t now, iowait;
+	ktime_t now, iowait, idle_entrytime;
 
 	if (!tick_nohz_enabled)
 		return -1;
 
+	idle_entrytime = ts->idle_entrytime;
+	smp_mb();
 	now = ktime_get();
 	if (last_update_time) {
 		update_ts_time_stats(cpu, ts, now, last_update_time);
 		iowait = ts->iowait_sleeptime;
 	} else {
-		if (cpu_online(cpu) && ts->idle_active &&
-						nr_iowait_cpu(cpu) > 0) {
-			ktime_t delta = ktime_sub(now, ts->idle_entrytime);
+		if (ts->idle_active && nr_iowait_cpu(cpu) > 0) {
+			ktime_t delta = ktime_sub(now, idle_entrytime);
 
 			iowait = ktime_add(ts->iowait_sleeptime, delta);
 		} else {
@@ -443,7 +445,6 @@ static void tick_nohz_stop_sched_tick(struct tick_sched *ts)
 out:
 	ts->next_jiffies = next_jiffies;
 	ts->last_jiffies = last_jiffies;
-	ts->sleep_length = ktime_sub(dev->next_event, now);
 }
 
 /**
@@ -512,8 +513,8 @@ void tick_nohz_irq_exit(void)
 ktime_t tick_nohz_get_sleep_length(void)
 {
 	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
-
-	return ts->sleep_length;
+	struct clock_event_device *dev = __get_cpu_var(tick_cpu_device).evtdev;
+	return ktime_sub(dev->next_event, ts->idle_entrytime);
 }
 
 static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)

@@ -58,10 +58,6 @@ struct tegra_dc_ext_win {
 	struct workqueue_struct	*flip_wq;
 
 	atomic_t		nr_pending_flips;
-
-	struct mutex		queue_lock;
-
-	struct list_head	timestamp_queue;
 };
 
 struct tegra_dc_ext {
@@ -137,8 +133,6 @@ extern int tegra_dc_ext_set_cursor_image(struct tegra_dc_ext_user *user,
 					 struct tegra_dc_ext_cursor_image *);
 extern int tegra_dc_ext_set_cursor(struct tegra_dc_ext_user *user,
 				   struct tegra_dc_ext_cursor *);
-extern int tegra_dc_ext_cursor_clip(struct tegra_dc_ext_user *user,
-					int *args);
 
 extern int tegra_dc_ext_control_init(void);
 

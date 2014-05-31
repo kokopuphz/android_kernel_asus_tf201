@@ -55,6 +55,11 @@ struct tegra_runtime_data {
 	int dma_req_idx;
 	struct tegra_dma_req dma_req[MAX_DMA_REQ_COUNT];
 	struct tegra_dma_channel *dma_chan;
+#ifdef CONFIG_MACH_X3
+	struct timer_list pcm_timeout;
+	unsigned long pcm_timeout_tick;
+	unsigned long callback_time;
+#endif
 	int dma_req_count;
 	int disable_intr;
 	unsigned int avp_dma_addr;

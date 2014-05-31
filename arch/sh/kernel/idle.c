@@ -96,9 +96,6 @@ void cpu_idle(void)
 			check_pgt_cache();
 			rmb();
 
-			if (cpu_is_offline(cpu))
-				play_dead();
-
 			local_irq_disable();
 			/* Don't trace irqs off for idle */
 			stop_critical_timings();
@@ -115,6 +112,8 @@ void cpu_idle(void)
 		rcu_idle_exit();
 		tick_nohz_idle_exit();
 		schedule_preempt_disabled();
+		if (cpu_is_offline(cpu))
+			play_dead();
 	}
 }
 

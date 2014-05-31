@@ -3,7 +3,7 @@
  *
  * Tegra graphics host driver
  *
- * Copyright (c) 2009-2013, NVIDIA Corporation.
+ * Copyright (c) 2009-2012, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -37,8 +37,6 @@
 #define NVHOST_PRIORITY_LOW 50
 #define NVHOST_PRIORITY_MEDIUM 100
 #define NVHOST_PRIORITY_HIGH 150
-
-#define NVHOST_TIMEOUT_FLAG_DISABLE_DUMP	0
 
 /* version 0 header (used with write() submit interface) */
 struct nvhost_submit_hdr {
@@ -89,11 +87,6 @@ struct nvhost_waitchk {
 	__u32 thresh;
 };
 
-struct nvhost_syncpt_incr {
-	__u32 syncpt_id;
-	__u32 syncpt_incrs;
-};
-
 struct nvhost_get_param_args {
 	__u32 value;
 };
@@ -107,61 +100,16 @@ struct nvhost_read_3d_reg_args {
 	__u32 value;
 };
 
-enum nvhost_clk_attr {
-	NVHOST_CLOCK = 0,
-	NVHOST_BW,
-};
-
-/*
- * moduleid[15:0]  => module id
- * moduleid[24:31] => nvhost_clk_attr
- */
-#define NVHOST_MODULE_ID_BIT_POS	0
-#define NVHOST_MODULE_ID_BIT_WIDTH	16
-#define NVHOST_CLOCK_ATTR_BIT_POS	24
-#define NVHOST_CLOCK_ATTR_BIT_WIDTH	8
 struct nvhost_clk_rate_args {
-	__u32 rate;
-	__u32 moduleid;
+	__u64 rate;
 };
 
 struct nvhost_set_timeout_args {
 	__u32 timeout;
 };
 
-struct nvhost_set_timeout_ex_args {
-	__u32 timeout;
-	__u32 flags;
-};
-
 struct nvhost_set_priority_args {
 	__u32 priority;
-};
-
-struct nvhost_ctrl_module_regrdwr_args {
-	__u32 id;
-	__u32 num_offsets;
-	__u32 block_size;
-	__u32 *offsets;
-	__u32 *values;
-	__u32 write;
-};
-
-struct nvhost_submit_args {
-	__u32 submit_version;
-	__u32 num_syncpt_incrs;
-	__u32 num_cmdbufs;
-	__u32 num_relocs;
-	__u32 num_waitchks;
-	__u32 timeout;
-	struct nvhost_syncpt_incr *syncpt_incrs;
-	struct nvhost_cmdbuf *cmdbufs;
-	struct nvhost_reloc *relocs;
-	struct nvhost_reloc_shift *reloc_shifts;
-	struct nvhost_waitchk *waitchks;
-
-	__u32 pad[5];		/* future expansion */
-	__u32 fence;		/* Return value */
 };
 
 #define NVHOST_IOCTL_CHANNEL_FLUSH		\
@@ -190,15 +138,9 @@ struct nvhost_submit_args {
 	_IOR(NVHOST_IOCTL_MAGIC, 12, struct nvhost_get_param_args)
 #define NVHOST_IOCTL_CHANNEL_SET_PRIORITY	\
 	_IOW(NVHOST_IOCTL_MAGIC, 13, struct nvhost_set_priority_args)
-#define NVHOST_IOCTL_CHANNEL_MODULE_REGRDWR	\
-	_IOWR(NVHOST_IOCTL_MAGIC, 14, struct nvhost_ctrl_module_regrdwr_args)
-#define NVHOST_IOCTL_CHANNEL_SUBMIT		\
-	_IOWR(NVHOST_IOCTL_MAGIC, 15, struct nvhost_submit_args)
-#define NVHOST_IOCTL_CHANNEL_SET_TIMEOUT_EX	\
-	_IOWR(NVHOST_IOCTL_MAGIC, 18, struct nvhost_set_timeout_ex_args)
 #define NVHOST_IOCTL_CHANNEL_LAST		\
-	_IOC_NR(NVHOST_IOCTL_CHANNEL_SET_TIMEOUT_EX)
-#define NVHOST_IOCTL_CHANNEL_MAX_ARG_SIZE sizeof(struct nvhost_submit_args)
+	_IOC_NR(NVHOST_IOCTL_CHANNEL_SET_PRIORITY)
+#define NVHOST_IOCTL_CHANNEL_MAX_ARG_SIZE sizeof(struct nvhost_submit_hdr_ext)
 
 struct nvhost_ctrl_syncpt_read_args {
 	__u32 id;
@@ -234,8 +176,15 @@ enum nvhost_module_id {
 	NVHOST_MODULE_VI,
 	NVHOST_MODULE_ISP,
 	NVHOST_MODULE_MPE,
-	NVHOST_MODULE_MSENC,
-	NVHOST_MODULE_TSEC,
+};
+
+struct nvhost_ctrl_module_regrdwr_args {
+	__u32 id;
+	__u32 num_offsets;
+	__u32 block_size;
+	__u32 *offsets;
+	__u32 *values;
+	__u32 write;
 };
 
 #define NVHOST_IOCTL_CTRL_SYNCPT_READ		\
@@ -256,11 +205,8 @@ enum nvhost_module_id {
 #define NVHOST_IOCTL_CTRL_GET_VERSION	\
 	_IOR(NVHOST_IOCTL_MAGIC, 7, struct nvhost_get_param_args)
 
-#define NVHOST_IOCTL_CTRL_SYNCPT_READ_MAX	\
-	_IOWR(NVHOST_IOCTL_MAGIC, 8, struct nvhost_ctrl_syncpt_read_args)
-
 #define NVHOST_IOCTL_CTRL_LAST			\
-	_IOC_NR(NVHOST_IOCTL_CTRL_SYNCPT_READ_MAX)
+	_IOC_NR(NVHOST_IOCTL_CTRL_GET_VERSION)
 #define NVHOST_IOCTL_CTRL_MAX_ARG_SIZE	\
 	sizeof(struct nvhost_ctrl_module_regrdwr_args)
 

@@ -1,127 +1,30 @@
 /*
- * drivers/video/tegra/dc/dsi.h
- *
- * Copyright (c) 2011-2012, NVIDIA CORPORATION, All rights reserved.
- *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
+  * drivers/video/tegra/dc/dsi.h
+  *
+  * Copyright (c) 2011, NVIDIA Corporation.
+  *
+  * This software is licensed under the terms of the GNU General Public
+  * License version 2, as published by the Free Software Foundation, and
+  * may be copied, distributed, and modified under those terms.
+  *
+  * This program is distributed in the hope that it will be useful,
+  * but WITHOUT ANY WARRANTY; without even the implied warranty of
+  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  * GNU General Public License for more details.
+  *
+  */
 
 #ifndef __DRIVERS_VIDEO_TEGRA_DC_DSI_H__
 #define __DRIVERS_VIDEO_TEGRA_DC_DSI_H__
 
-/* Defines the DSI phy timing parameters */
-struct dsi_phy_timing_inclk {
-	unsigned	t_hsdexit;
-	unsigned	t_hstrail;
-	unsigned	t_hsprepare;
-	unsigned	t_datzero;
-
-	unsigned	t_clktrail;
-	unsigned	t_clkpost;
-	unsigned	t_clkzero;
-	unsigned	t_tlpx;
-
-	unsigned	t_clkpre;
-	unsigned	t_clkprepare;
-	unsigned	t_wakeup;
-
-	unsigned	t_taget;
-	unsigned	t_tasure;
-	unsigned	t_tago;
+/* source of video data */
+enum {
+	TEGRA_DSI_VIDEO_DRIVEN_BY_DC,
+	TEGRA_DSI_VIDEO_DRIVEN_BY_HOST,
 };
-
-struct dsi_status {
-	unsigned init:2;
-
-	unsigned lphs:2;
-
-	unsigned vtype:2;
-	unsigned driven:2;
-
-	unsigned clk_out:2;
-	unsigned clk_mode:2;
-	unsigned clk_burst:2;
-
-	unsigned lp_op:2;
-
-	unsigned dc_stream:1;
-};
-
-struct tegra_dc_dsi_data {
-	struct tegra_dc *dc;
-	void __iomem *base;
-	struct resource *base_res;
-
-	struct clk *dc_clk;
-	struct clk *dsi_clk;
-	struct clk *dsi_fixed_clk;
-	bool clk_ref;
-
-	struct mutex lock;
-
-	struct tegra_dsi_out_ops *out_ops;
-	void			*out_data;
-
-	/* data from board info */
-	struct tegra_dsi_out info;
-
-	struct tegra_mipi_cal *mipi_cal;
-
-	struct dsi_status status;
-
-	struct dsi_phy_timing_inclk phy_timing;
-
-	bool ulpm;
-	bool enabled;
-	bool host_suspended;
-	struct mutex host_lock;
-	struct delayed_work idle_work;
-	unsigned long idle_delay;
-	atomic_t host_ref;
-
-	u8 driven_mode;
-	u8 controller_index;
-
-	u8 pixel_scaler_mul;
-	u8 pixel_scaler_div;
-
-	struct tegra_dc_shift_clk_div default_shift_clk_div;
-	u32 default_pixel_clk_khz;
-	u32 default_hs_clk_khz;
-
-	struct tegra_dc_shift_clk_div shift_clk_div;
-	u32 target_hs_clk_khz;
-	u32 target_lp_clk_khz;
-
-	u32 syncpt_id;
-	u32 syncpt_val;
-
-	u16 current_bit_clk_ns;
-	u32 current_dsi_clk_khz;
-
-	struct regulator *avdd_dsi_csi;
-
-	u32 dsi_control_val;
-};
-
-#define MAX_DSI_INSTANCE	2
 
 /* Max number of data lanes supported */
-#if defined(CONFIG_ARCH_TEGRA_3x_SOC) || \
-	defined(CONFIG_ARCH_TEGRA_2x_SOC)
 #define MAX_DSI_DATA_LANES	2
-#else
-#define MAX_DSI_DATA_LANES	8
-#endif
-
 /* Default Peripheral reset timeout */
 #define DSI_PR_TO_VALUE		0x2000
 
@@ -276,6 +179,55 @@ enum {
 
 #define DSI_CTRL_VIDEO_MODE	(DSI_CONTROL_VID_DCS_ENABLE(TEGRA_DSI_DISABLE))
 
+
+enum {
+	CMD_VS		= 0x01,
+	CMD_VE		= 0x11,
+
+	CMD_HS		= 0x21,
+	CMD_HE		= 0x31,
+
+	CMD_EOT		= 0x08,
+	CMD_NULL	= 0x09,
+	CMD_SHORTW	= 0x15,
+	CMD_BLNK	= 0x19,
+	CMD_LONGW	= 0x39,
+
+	CMD_RGB	= 0x00,
+	CMD_RGB_16BPP	= 0x0E,
+	CMD_RGB_18BPP	= 0x1E,
+	CMD_RGB_18BPPNP = 0x2E,
+	CMD_RGB_24BPP	= 0x3E,
+};
+
+#define PKT_ID0(id)		(DSI_PKT_SEQ_0_LO_PKT_00_ID(id) | \
+				DSI_PKT_SEQ_1_LO_PKT_10_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN0(len)	(DSI_PKT_SEQ_0_LO_PKT_00_SIZE(len))
+
+#define PKT_ID1(id)		(DSI_PKT_SEQ_0_LO_PKT_01_ID(id) | \
+				DSI_PKT_SEQ_1_LO_PKT_11_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN1(len)	(DSI_PKT_SEQ_0_LO_PKT_01_SIZE(len))
+
+#define PKT_ID2(id)		(DSI_PKT_SEQ_0_LO_PKT_02_ID(id) | \
+				DSI_PKT_SEQ_1_LO_PKT_12_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN2(len)	(DSI_PKT_SEQ_0_LO_PKT_02_SIZE(len))
+
+#define PKT_ID3(id)		(DSI_PKT_SEQ_0_HI_PKT_03_ID(id) | \
+				DSI_PKT_SEQ_1_HI_PKT_13_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN3(len)	(DSI_PKT_SEQ_0_HI_PKT_03_SIZE(len))
+
+#define PKT_ID4(id)		(DSI_PKT_SEQ_0_HI_PKT_04_ID(id) | \
+				DSI_PKT_SEQ_1_HI_PKT_14_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN4(len)	(DSI_PKT_SEQ_0_HI_PKT_04_SIZE(len))
+
+#define PKT_ID5(id)		(DSI_PKT_SEQ_0_HI_PKT_05_ID(id) | \
+				DSI_PKT_SEQ_1_HI_PKT_15_EN(TEGRA_DSI_ENABLE))
+#define PKT_LEN5(len)	(DSI_PKT_SEQ_0_HI_PKT_05_SIZE(len))
+
+#define PKT_LP		(DSI_PKT_SEQ_0_LO_SEQ_0_FORCE_LP(TEGRA_DSI_ENABLE))
+
+#define NUMOF_PKT_SEQ	12
+
 /* Mipi v1.00.00 phy timing range */
 #define NOT_DEFINED			-1
 #define MIPI_T_HSEXIT_NS_MIN		100
@@ -399,32 +351,25 @@ T_TASURE_NS_DEFAULT, clk_ns, T_TASURE_HW_INC))
 (DSI_CONVERT_T_PHY_NS_TO_T_PHY( \
 T_TAGET_NS_DEFAULT, clk_ns, T_TAGET_HW_INC))
 
-struct tegra_dsi_out_ops {
-	/* initialize output.  dsi clocks are not on at this point */
-	int (*init)(struct tegra_dc_dsi_data *);
-	/* destroy output.  dsi clocks are not on at this point */
-	void (*destroy)(struct tegra_dc_dsi_data *);
-	/* enable output.  dsi clocks are on at this point */
-	void (*enable)(struct tegra_dc_dsi_data *);
-	/* disable output.  dsi clocks are on at this point */
-	void (*disable)(struct tegra_dc_dsi_data *dc);
-	/* suspend output.  dsi clocks are on at this point */
-	void (*suspend)(struct tegra_dc_dsi_data *);
-	/* resume output.  dsi clocks are on at this point */
-	void (*resume)(struct tegra_dc_dsi_data *);
+/* Defines the DSI phy timing parameters */
+struct dsi_phy_timing_inclk {
+	unsigned	t_hsdexit;
+	unsigned	t_hstrail;
+	unsigned	t_hsprepare;
+	unsigned	t_datzero;
+
+	unsigned	t_clktrail;
+	unsigned	t_clkpost;
+	unsigned	t_clkzero;
+	unsigned	t_tlpx;
+
+	unsigned	t_clkpre;
+	unsigned	t_clkprepare;
+	unsigned	t_wakeup;
+
+	unsigned	t_taget;
+	unsigned	t_tasure;
+	unsigned	t_tago;
 };
-extern struct tegra_dsi_out_ops tegra_dsi2lvds_ops;
-extern struct tegra_dsi_out_ops tegra_dsi2edp_ops;
-
-static inline void *tegra_dsi_get_outdata(struct tegra_dc_dsi_data *dsi)
-{
-	return dsi->out_data;
-}
-
-static inline void tegra_dsi_set_outdata(struct tegra_dc_dsi_data *dsi,
-						void *data)
-{
-	dsi->out_data = data;
-}
 
 #endif

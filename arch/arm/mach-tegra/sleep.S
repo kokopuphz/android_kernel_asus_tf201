@@ -1,7 +1,7 @@
 /*
  * arch/arm/mach-tegra/sleep.S
  *
- * Copyright (c) 2010-2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2010-2012, NVIDIA Corporation.
  * Copyright (c) 2011, Google, Inc.
  *
  * Author: Colin Cross <ccross@android.com>
@@ -48,6 +48,7 @@
 #define CLK_RESET_CCLK_DIVIDER		0x24
 
 #define TEGRA_PMC_VIRT		(TEGRA_PMC_BASE - IO_APB_PHYS + IO_APB_VIRT)
+#define TEGRA_CLK_RESET_VIRT	(TEGRA_CLK_RESET_BASE - IO_PPSB_PHYS + IO_PPSB_VIRT)
 
 #define TEGRA_FLOW_CTRL_VIRT (TEGRA_FLOW_CTRL_BASE - IO_PPSB_PHYS \
 					+ IO_PPSB_VIRT)
@@ -113,6 +114,12 @@ ENDPROC(tegra_pen_unlock)
  * corrupts r4-r5
  */
 ENTRY(tegra_cpu_exit_coherency)
+#ifdef CONFIG_ARCH_TEGRA_11x_SOC
+	ldr	r4, =TEGRA_CLK_RESET_VIRT
+	ldr	r5, [r4, #0x70]	/* BOND_OUT_L */
+	tst	r5, #1
+	bne	.
+#endif
 	exit_smp r4, r5
 	mov	pc, lr
 ENDPROC(tegra_cpu_exit_coherency)
@@ -153,7 +160,7 @@ ENDPROC(tegra_flush_cache)
  * Disable is needed before flush to prevent allocations during flush
  * When cache is disabled, we cannot push to stack.
  *
- * Corrupted registers: r0-r7, r9-r11
+ * EternityProject: Corrupted registers: r0-r11
  */
 ENTRY(tegra_flush_l1_cache)
 	stmfd	sp!, {r4-r5, r7, r9-r11, lr}
@@ -185,8 +192,13 @@ ENTRY(tegra_flush_l1_cache)
 1001:
 	mov	r9, r4						@ create working copy of max way size
 1002:
-	orr	r11, r10, r9, lsl r5		@ factor way and cache number into r11
-	orr	r11, r11, r7, lsl r2		@ factor index number into r11
+	/* EternityProject: Use legal Thumb-2 instructions */
+	lsl	r8, r9, r5			@ factor way
+	orr	r11, r10, r8			@ cache number into r11
+
+	lsl	r8, r7, r2			@ factor index
+	orr	r11, r11, r8			@ and store into r11
+	/* EternityProject: END */
 	mcr	p15, 0, r11, c7, c14, 2		@ op=c10/c14, clean/flush by set/way
 	subs	r9, r9, #1				@ decrement the way
 	bge	1002b
@@ -303,28 +315,83 @@ ENDPROC(tegra_cpu_pllp)
 #endif
 
 #ifdef CONFIG_TRUSTED_FOUNDATIONS
+
 /*
- * tegra_generic_smc
+ * Confirm we're issuing this SMC from CPU0 (only one
+ * currently supported) and issue the instruction.
  *
  * r0 = smc type
  * r1 = smc subtype
  * r2 = argument passed to smc
- *
- * issues SMC (secure monitor call) instruction with
- * the specified parameters.
  */
-ENTRY(tegra_generic_smc)
-	adr	r3, __tegra_smc_stack
-	stmia	r3, {r4-r12, lr}
+.macro smc_issue_smc tmp
+	cpu_id	\tmp
+	cmp	\tmp, #0
+	bne	.
 	mov	r3, #0
 	mov	r4, #0
 	dsb
 	smc	#0
-	adr	r3, __tegra_smc_stack
-	ldmia	r3, {r4-r12, pc}
+.endm
+
+/*
+ * Issue SMC with ctx kept on an uncached stack
+ */
+ENTRY(tegra_generic_smc_uncached)
+#if defined(CONFIG_PM_SLEEP) && defined(CONFIG_CACHE_L2X0)
+	mov32	r3, tegra_cpu_context		@ borrow CPU0's non-cached
+	ldr	r3, [r3]			@ context grows up
+	stmia	r3, {r4-r12, sp, lr}
+
+	smc_issue_smc r5
+
+	mov32	r3, tegra_cpu_context		@ borrow CPU0's non-cached
+	ldr	r3, [r3]			@ context grows up
+	ldmia	r3, {r4-r12, sp, pc}
+#else
+	mov	pc, lr
+#endif
+ENDPROC(tegra_generic_smc_uncached)
+
+/*
+ * Issue SMC with ctx kept on a cacheable stack
+ * 	(args in R0, R1, R2 and R3 holds save/restore ptr)
+ */
+ENTRY(tegra_generic_smc_cached)
+	stmia	r3, {r4-r12, sp, lr}
+	adr	r4, __tegra_smc_current_ctx	@ save current ptr
+	str	r3, [r4]
+
+	smc_issue_smc r5
+
+	adr	r4, __tegra_smc_current_ctx	@ restore from saved ptr
+	ldr	r3, [r4]
+	ldmia	r3, {r4-r12, sp, pc}
+ENDPROC(tegra_generic_smc_cached)
+	.type	__tegra_smc_current_ctx, %object
+__tegra_smc_current_ctx:
+	.long   0
+	.size   __tegra_smc_current_ctx, . - __tegra_smc_current_ctx
+
+#define TEGRA_SMC_SAVED_WORDS	11
+
+/* SMC issued using the current cacheable SP stack */
+ENTRY(tegra_generic_smc)
+	mov	r3, sp					@ use current stack
+	sub	r3, #(TEGRA_SMC_SAVED_WORDS << 2)	@ context grows up
+	b	tegra_generic_smc_cached
 ENDPROC(tegra_generic_smc)
-	.type   __tegra_smc_stack, %object
+
+/* SMC issued using a local cacheable stack */
+ENTRY(tegra_generic_smc_local)
+	adr	r3, __tegra_smc_stack			@ use local stack
+	b	tegra_generic_smc_cached
+ENDPROC(tegra_generic_smc_local)
+	.align	L1_CACHE_SHIFT
+	.type	__tegra_smc_stack, %object
 __tegra_smc_stack:
-	.long   0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+	.rept	TEGRA_SMC_SAVED_WORDS
+	.long   0
+	.endr
 	.size   __tegra_smc_stack, . - __tegra_smc_stack
 #endif

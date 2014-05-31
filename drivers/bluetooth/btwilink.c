@@ -22,13 +22,14 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  */
+#define DEBUG
+#include <linux/module.h>
 #include <linux/platform_device.h>
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
 #include <net/bluetooth/hci.h>
 
 #include <linux/ti_wilink_st.h>
-#include <linux/module.h>
 
 /* Bluetooth Driver Version */
 #define VERSION               "1.0"
@@ -160,7 +161,7 @@ static int ti_st_open(struct hci_dev *hdev)
 		return -EBUSY;
 
 	/* provide contexts for callbacks from ST */
-	hst = hci_get_drvdata(hdev);
+	hst = hdev->driver_data;
 
 	for (i = 0; i < MAX_BT_CHNL_IDS; i++) {
 		ti_st_proto[i].priv_data = hst;
@@ -235,7 +236,7 @@ done:
 static int ti_st_close(struct hci_dev *hdev)
 {
 	int err, i;
-	struct ti_st *hst = hci_get_drvdata(hdev);
+	struct ti_st *hst = hdev->driver_data;
 
 	if (!test_and_clear_bit(HCI_RUNNING, &hdev->flags))
 		return 0;
@@ -263,19 +264,21 @@ static int ti_st_send_frame(struct sk_buff *skb)
 	if (!test_bit(HCI_RUNNING, &hdev->flags))
 		return -EBUSY;
 
-	hst = hci_get_drvdata(hdev);
+	hst = hdev->driver_data;
 
 	/* Prepend skb with frame type */
 	memcpy(skb_push(skb, 1), &bt_cb(skb)->pkt_type, 1);
 
-	BT_DBG("%s: type %d len %d", hdev->name, bt_cb(skb)->pkt_type,
-			skb->len);
 
 	/* Insert skb to shared transport layer's transmit queue.
 	 * Freeing skb memory is taken care in shared transport layer,
 	 * so don't free skb memory here.
 	 */
-	len = hst->st_write(skb);
+	if(hst->st_write != NULL)
+		len = hst->st_write(skb);
+	else
+		len = -1;
+
 	if (len < 0) {
 		kfree_skb(skb);
 		BT_ERR("ST write failed (%ld)", len);
@@ -288,6 +291,14 @@ static int ti_st_send_frame(struct sk_buff *skb)
 	ti_st_tx_complete(hst, bt_cb(skb)->pkt_type);
 
 	return 0;
+}
+
+static void ti_st_destruct(struct hci_dev *hdev)
+{
+	BT_DBG("%s", hdev->name);
+	/* do nothing here, since platform remove
+	 * would free the hdev->driver_data
+	 */
 }
 
 static int bt_ti_probe(struct platform_device *pdev)
@@ -311,11 +322,13 @@ static int bt_ti_probe(struct platform_device *pdev)
 
 	hst->hdev = hdev;
 	hdev->bus = HCI_UART;
-	hci_set_drvdata(hdev, hst);
+	hdev->driver_data = hst;
 	hdev->open = ti_st_open;
 	hdev->close = ti_st_close;
 	hdev->flush = NULL;
 	hdev->send = ti_st_send_frame;
+	hdev->destruct = ti_st_destruct;
+	hdev->owner = THIS_MODULE;
 
 	err = hci_register_dev(hdev);
 	if (err < 0) {

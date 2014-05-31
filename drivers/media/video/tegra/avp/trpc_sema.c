@@ -15,6 +15,7 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/err.h>
 #include <linux/file.h>
 #include <linux/fs.h>
@@ -26,7 +27,6 @@
 #include <linux/types.h>
 #include <linux/uaccess.h>
 #include <linux/wait.h>
-#include <linux/export.h>
 
 #include "trpc_sema.h"
 

@@ -1375,7 +1375,9 @@ static struct platform_driver fiq_debugger_driver = {
 
 static int __init fiq_debugger_init(void)
 {
+#ifdef CONFIG_FIQ_DEBUGGER_CONSOLE
 	fiq_debugger_tty_init();
+#endif
 	return platform_driver_register(&fiq_debugger_driver);
 }
 

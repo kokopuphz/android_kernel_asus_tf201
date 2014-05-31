@@ -31,8 +31,8 @@
 #include <linux/platform_device.h>
 #include <linux/rtc.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 #include <linux/gpio.h>
+#include <linux/module.h>
 
 #define RTC_CTRL		0x10
 #define RTC_STATUS		0x11
@@ -381,7 +381,8 @@ static int __devinit tps80031_rtc_probe(struct platform_device *pdev)
 
 	rtc->msecure_gpio = -1;
 	if (gpio_is_valid(pdata->msecure_gpio)) {
-		err = gpio_request(pdata->msecure_gpio, "tps80031 msecure");
+		//err = gpio_request(pdata->msecure_gpio, "tps80031 msecure");
+		err = gpio_request(pdata->msecure_gpio, "pmu_msecure");
 		if (err == 0) {
 			rtc->msecure_gpio = pdata->msecure_gpio;
 			gpio_direction_output(rtc->msecure_gpio, 0);

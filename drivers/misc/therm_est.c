@@ -52,6 +52,12 @@ struct therm_estimator {
 #endif
 };
 
+extern int nct1008_is_disabled(void);
+
+#ifdef CONFIG_MACH_X3
+static long cur_skin_temp1 = 30000;
+#endif
+
 static void therm_est_work_func(struct work_struct *work)
 {
 	int i, j, index, sum = 0;
@@ -62,6 +68,9 @@ static void therm_est_work_func(struct work_struct *work)
 					dwork,
 					struct therm_estimator,
 					therm_est_work);
+
+	if (unlikely(nct1008_is_disabled()))
+		goto sensordisabled;
 
 	for (i = 0; i < est->ndevs; i++) {
 		if (est->devs[i].get_temp(est->devs[i].dev_data, &temp))
@@ -79,14 +88,24 @@ static void therm_est_work_func(struct work_struct *work)
 
 	est->cur_temp = sum / 100 + est->toffset;
 
+#ifdef CONFIG_MACH_X3
+	cur_skin_temp1 = est->cur_temp;
+#endif
+
 	est->ntemp++;
 
 	if (est->cur_temp >= est->trip_temp)
 		if (est->thz && !est->thz->passive)
 			thermal_zone_device_update(est->thz);
 
+sensordisabled:
 	queue_delayed_work(est->workqueue, &est->therm_est_work,
 				msecs_to_jiffies(est->polling_period));
+}
+
+long eprj_get_current_skin_temp()
+{
+	return cur_skin_temp1;
 }
 
 static int therm_est_bind(struct thermal_zone_device *thz,

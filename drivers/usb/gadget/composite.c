@@ -14,12 +14,16 @@
 #include <linux/kallsyms.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#include <linux/module.h>
 #include <linux/device.h>
 #include <linux/utsname.h>
-
+#include <linux/delay.h>
 #include <linux/usb/composite.h>
 #include <asm/unaligned.h>
+#include <../arch/arm/mach-tegra/eprj_enru/include/mach/board_htc.h>
+
+/*USB-IF failed because mute uevent if switching usb functions without vbus changes.
+For this case, driver needs to send uevent to notfiy mtp service*/
+static bool is_mtp_enabled;
 
 /*
  * The code in this file is utility code, used to build a gadget driver
@@ -29,10 +33,12 @@
  */
 
 /* big enough to hold our biggest descriptor */
-#define USB_BUFSIZ	1024
+#define USB_BUFSIZ	4096
 
 static struct usb_composite_driver *composite;
 static int (*composite_gadget_bind)(struct usb_composite_dev *cdev);
+static void mtp_update_mode(int _mac_mtp_mode);
+static void fsg_update_mode(int _linux_fsg_mode);
 
 /* Some systems will need runtime overrides for the  product identifiers
  * published in the device descriptor, either numbers or strings or both.
@@ -64,6 +70,59 @@ module_param(iSerialNumber, charp, 0);
 MODULE_PARM_DESC(iSerialNumber, "SerialNumber string");
 
 static char composite_manufacturer[50];
+int htcctusbcmd;
+
+static ssize_t print_switch_name(struct switch_dev *sdev, char *buf)
+{
+	return sprintf(buf, "%s\n", sdev->name);
+}
+
+static ssize_t print_switch_state(struct switch_dev *sdev, char *buf)
+{
+
+	return sprintf(buf, "%s\n", (htcctusbcmd ? "Capture" : "None"));
+}
+
+struct switch_dev compositesdev = {
+	.name = "htcctusbcmd",
+	.print_name = print_switch_name,
+	.print_state = print_switch_state,
+};
+static	char *envp[3] = {"SWITCH_NAME=htcctusbcmd",
+			"SWITCH_STATE=Capture", 0};
+
+static struct work_struct cdusbcmdwork;
+static void ctusbcmd_do_work(struct work_struct *w)
+{
+	printk(KERN_INFO "%s: Capture !\n", __func__);
+	kobject_uevent_env(&compositesdev.dev->kobj, KOBJ_CHANGE, envp);
+}
+
+static void composite_disconnect(struct usb_gadget *gadget);
+#ifdef CONFIG_MACH_X3
+static int usb_autobot_mode(void) { return 0; }
+#else
+static int usb_autobot_mode(void);
+#endif
+void usb_composite_force_reset(struct usb_composite_dev *cdev);
+#define REQUEST_RESET_DELAYED msecs_to_jiffies(100)
+static void composite_request_reset(struct work_struct *w)
+{
+	struct usb_composite_dev *cdev = container_of(
+			(struct delayed_work *)w,
+			struct usb_composite_dev, request_reset);
+	if (cdev) {
+		if (usb_autobot_mode() || board_mfg_mode()) return;
+
+		INFO(cdev, "%s\n", __func__);
+		if (os_type == OS_LINUX)
+			fsg_update_mode(1);
+		else
+			fsg_update_mode(0);
+		composite_disconnect(cdev->gadget);
+		usb_composite_force_reset(cdev);
+	}
+}
 
 /*-------------------------------------------------------------------------*/
 /**
@@ -175,12 +234,13 @@ ep_found:
 	_ep->comp_desc = comp_desc;
 	if (g->speed == USB_SPEED_SUPER) {
 		switch (usb_endpoint_type(_ep->desc)) {
-		case USB_ENDPOINT_XFER_ISOC:
-			/* mult: bits 1:0 of bmAttributes */
-			_ep->mult = comp_desc->bmAttributes & 0x3;
 		case USB_ENDPOINT_XFER_BULK:
 		case USB_ENDPOINT_XFER_INT:
 			_ep->maxburst = comp_desc->bMaxBurst;
+			break;
+		case USB_ENDPOINT_XFER_ISOC:
+			/* mult: bits 1:0 of bmAttributes */
+			_ep->mult = comp_desc->bmAttributes & 0x3;
 			break;
 		default:
 			/* Do nothing for control endpoints */
@@ -188,6 +248,23 @@ ep_found:
 		}
 	}
 	return 0;
+}
+
+void usb_composite_force_reset(struct usb_composite_dev *cdev)
+{
+	unsigned long			flags;
+
+	spin_lock_irqsave(&cdev->lock, flags);
+	/* force reenumeration */
+	if (cdev && cdev->gadget && cdev->gadget->speed != USB_SPEED_UNKNOWN) {
+		spin_unlock_irqrestore(&cdev->lock, flags);
+
+		usb_gadget_disconnect(cdev->gadget);
+		msleep(500);
+		usb_gadget_connect(cdev->gadget);
+	} else {
+		spin_unlock_irqrestore(&cdev->lock, flags);
+	}
 }
 
 /**
@@ -357,7 +434,6 @@ static int config_buf(struct usb_configuration *config,
 	int				len = USB_BUFSIZ - USB_DT_CONFIG_SIZE;
 	struct usb_function		*f;
 	int				status;
-	int				interfaceCount = 0;
 
 	/* write the config descriptor */
 	c = buf;
@@ -395,16 +471,8 @@ static int config_buf(struct usb_configuration *config,
 			descriptors = f->descriptors;
 		}
 
-		if (f->hidden || !descriptors || descriptors[0] == NULL) {
-			for (; f != config->interface[interfaceCount];) {
-				interfaceCount++;
-				c->bNumInterfaces--;
-			}
+		if (!descriptors)
 			continue;
-		}
-		for (; f != config->interface[interfaceCount];)
-			interfaceCount++;
-
 		status = usb_descriptor_fillbuf(next, len,
 			(const struct usb_descriptor_header **) descriptors);
 		if (status < 0)
@@ -696,6 +764,7 @@ static int set_config(struct usb_composite_dev *cdev,
 	power = c->bMaxPower ? (2 * c->bMaxPower) : CONFIG_USB_GADGET_VBUS_DRAW;
 done:
 	usb_gadget_vbus_draw(gadget, power);
+
 	if (result >= 0 && cdev->delayed_status)
 		result = USB_GADGET_DELAYED_STATUS;
 	return result;
@@ -743,7 +812,7 @@ int usb_add_config(struct usb_composite_dev *cdev,
 
 	INIT_LIST_HEAD(&config->functions);
 	config->next_interface_id = 0;
-	memset(config->interface, 0, sizeof(config->interface));
+	memset(config->interface, '\0', sizeof(config->interface));
 
 	status = bind(config);
 	if (status < 0) {
@@ -784,7 +853,7 @@ done:
 	return status;
 }
 
-static int unbind_config(struct usb_composite_dev *cdev,
+static int remove_config(struct usb_composite_dev *cdev,
 			      struct usb_configuration *config)
 {
 	while (!list_empty(&config->functions)) {
@@ -799,6 +868,7 @@ static int unbind_config(struct usb_composite_dev *cdev,
 			/* may free memory for "f" */
 		}
 	}
+	list_del(&config->list);
 	if (config->unbind) {
 		DBG(cdev, "unbind config '%s'/%p\n", config->label, config);
 		config->unbind(config);
@@ -807,15 +877,6 @@ static int unbind_config(struct usb_composite_dev *cdev,
 	return 0;
 }
 
-/**
- * usb_remove_config() - remove a configuration from a device.
- * @cdev: wraps the USB gadget
- * @config: the configuration
- *
- * Drivers must call usb_gadget_disconnect before calling this function
- * to disconnect the device from the host and make sure the host will not
- * try to enumerate the device while we are changing the config list.
- */
 int usb_remove_config(struct usb_composite_dev *cdev,
 		      struct usb_configuration *config)
 {
@@ -826,11 +887,9 @@ int usb_remove_config(struct usb_composite_dev *cdev,
 	if (cdev->config == config)
 		reset_config(cdev);
 
-	list_del(&config->list);
-
 	spin_unlock_irqrestore(&cdev->lock, flags);
 
-	return unbind_config(cdev, config);
+	return remove_config(cdev, config);
 }
 
 /*-------------------------------------------------------------------------*/
@@ -1138,6 +1197,23 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 				break;
 			/* FALLTHROUGH */
 		case USB_DT_CONFIG:
+			if (w_length == 4) {
+//				pr_info("[USB] %s: OS_MAC\n", __func__);
+				os_type = OS_MAC;
+				mtp_update_mode(1);
+			} else if (w_length == 255) {
+//				pr_info("[USB] %s: OS_WINDOWS\n", __func__);
+				os_type = OS_WINDOWS;
+			} else if (w_length == 9 && os_type != OS_WINDOWS) {
+//				pr_info("[USB] %s: OS_LINUX\n", __func__);
+				if (os_type != OS_LINUX) {
+					os_type = OS_LINUX;
+					schedule_delayed_work(
+						&cdev->request_reset,
+						REQUEST_RESET_DELAYED);
+				}
+			}
+
 			value = config_desc(cdev, w_value);
 			if (value >= 0)
 				value = min(w_length, (u16) value);
@@ -1176,12 +1252,11 @@ composite_setup(struct usb_gadget *gadget, const struct usb_ctrlrequest *ctrl)
 	case USB_REQ_GET_CONFIGURATION:
 		if (ctrl->bRequestType != USB_DIR_IN)
 			goto unknown;
-		if (cdev->config) {
+		if (cdev->config)
 			*(u8 *)req->buf = cdev->config->bConfigurationValue;
-			value = min(w_length, (u16) 1);
-		} else {
+		else
 			*(u8 *)req->buf = 0;
-		}
+		value = min(w_length, (u16) 1);
 		break;
 
 	/* function drivers must handle get/set altsetting; if there's
@@ -1320,25 +1395,6 @@ unknown:
 				value = c->setup(c, ctrl);
 		}
 
-		/* If the vendor request is not processed (value < 0),
-		 * call all device registered configure setup callbacks
-		 * to process it.
-		 * This is used to handle the following cases:
-		 * - vendor request is for the device and arrives before
-		 * setconfiguration.
-		 * - Some devices are required to handle vendor request before
-		 * setconfiguration such as MTP, USBNET.
-		 */
-
-		if (value < 0) {
-			struct usb_configuration        *cfg;
-
-			list_for_each_entry(cfg, &cdev->configs, list) {
-			if (cfg && cfg->setup)
-				value = cfg->setup(cfg, ctrl);
-			}
-		}
-
 		goto done;
 	}
 
@@ -1376,6 +1432,10 @@ static void composite_disconnect(struct usb_gadget *gadget)
 		reset_config(cdev);
 	if (composite->disconnect)
 		composite->disconnect(cdev);
+	if (cdev->delayed_status != 0) {
+		WARN(cdev, "%s: delayed_status is not 0 in disconnect status\n", __func__);
+		cdev->delayed_status = 0;
+	}
 	spin_unlock_irqrestore(&cdev->lock, flags);
 }
 
@@ -1409,8 +1469,7 @@ composite_unbind(struct usb_gadget *gadget)
 		struct usb_configuration	*c;
 		c = list_first_entry(&cdev->configs,
 				struct usb_configuration, list);
-		list_del(&c->list);
-		unbind_config(cdev, c);
+		remove_config(cdev, c);
 	}
 	if (composite->unbind)
 		composite->unbind(cdev);
@@ -1465,6 +1524,7 @@ static int composite_bind(struct usb_gadget *gadget)
 	cdev->bufsiz = USB_BUFSIZ;
 	cdev->driver = composite;
 
+	INIT_DELAYED_WORK(&cdev->request_reset, composite_request_reset);
 	/*
 	 * As per USB compliance update, a device that is actively drawing
 	 * more than 100mA from USB must report itself as bus-powered in
@@ -1635,6 +1695,7 @@ static struct usb_gadget_driver composite_driver = {
 int usb_composite_probe(struct usb_composite_driver *driver,
 			       int (*bind)(struct usb_composite_dev *cdev))
 {
+	int rc;
 	if (!driver || !driver->dev || !bind || composite)
 		return -EINVAL;
 
@@ -1648,6 +1709,11 @@ int usb_composite_probe(struct usb_composite_driver *driver,
 		min_t(u8, composite_driver.max_speed, driver->max_speed);
 	composite = driver;
 	composite_gadget_bind = bind;
+
+	rc = switch_dev_register(&compositesdev);
+	INIT_WORK(&cdusbcmdwork, ctusbcmd_do_work);
+	if (rc < 0)
+		pr_err("%s: switch_dev_register fail", __func__);
 
 	return usb_gadget_probe_driver(&composite_driver, composite_bind);
 }

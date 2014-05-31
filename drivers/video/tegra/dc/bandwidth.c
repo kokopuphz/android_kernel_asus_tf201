@@ -24,7 +24,6 @@
 #include <mach/mc.h>
 #include <linux/nvhost.h>
 #include <mach/latency_allowance.h>
-#include <trace/events/display.h>
 
 #include "dc_reg.h"
 #include "dc_config.h"
@@ -47,28 +46,22 @@ static void tegra_dc_set_latency_allowance(struct tegra_dc *dc,
 		{ TEGRA_LA_DISPLAY_0AB, TEGRA_LA_DISPLAY_0BB,
 			TEGRA_LA_DISPLAY_0CB },
 	};
-#if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
 	/* window B V-filter tap for first and second display. */
 	static const enum tegra_la_id vfilter_tab[2] = {
 		TEGRA_LA_DISPLAY_1B, TEGRA_LA_DISPLAY_1BB,
 	};
-#endif
 	unsigned long bw;
 
 	BUG_ON(dc->ndev->id >= ARRAY_SIZE(la_id_tab));
-#if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
 	BUG_ON(dc->ndev->id >= ARRAY_SIZE(vfilter_tab));
-#endif
 	BUG_ON(w->idx >= ARRAY_SIZE(*la_id_tab));
 
 	bw = max(w->bandwidth, w->new_bandwidth);
 
-#if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
 	/* tegra_dc_get_bandwidth() treats V filter windows as double
 	 * bandwidth, but LA has a seperate client for V filter */
 	if (w->idx == 1 && win_use_v_filter(dc, w))
 		bw /= 2;
-#endif
 
 	/* our bandwidth is in kbytes/sec, but LA takes MBps.
 	 * round up bandwidth to next 1MBps */
@@ -76,11 +69,9 @@ static void tegra_dc_set_latency_allowance(struct tegra_dc *dc,
 
 #ifdef CONFIG_TEGRA_SILICON_PLATFORM
 	tegra_set_latency_allowance(la_id_tab[dc->ndev->id][w->idx], bw);
-#if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
 	/* if window B, also set the 1B client for the 2-tap V filter. */
 	if (w->idx == 1)
 		tegra_set_latency_allowance(vfilter_tab[dc->ndev->id], bw);
-#endif
 #endif
 }
 
@@ -157,7 +148,7 @@ static unsigned long tegra_dc_find_max_bandwidth(struct tegra_dc_win *wins[],
  * (windows_tiling ? 2 : 1)
  *
  * note:
- * (*) We use 2 tap V filter on T2x/T3x, so need double BW if use V filter
+ * (*) We use 2 tap V filter, so need double BW if use V filter
  * (*) Tiling mode on T30 and DDR3 requires double BW
  *
  * return:
@@ -169,7 +160,6 @@ static unsigned long tegra_dc_calc_win_bandwidth(struct tegra_dc *dc,
 	unsigned long ret;
 	int tiled_windows_bw_multiplier;
 	unsigned long bpp;
-	unsigned in_w;
 
 	if (!WIN_IS_ENABLED(w))
 		return 0;
@@ -177,11 +167,6 @@ static unsigned long tegra_dc_calc_win_bandwidth(struct tegra_dc *dc,
 	if (dfixed_trunc(w->w) == 0 || dfixed_trunc(w->h) == 0 ||
 	    w->out_w == 0 || w->out_h == 0)
 		return 0;
-	if (w->flags & TEGRA_WIN_FLAG_SCAN_COLUMN)
-		/* rotated: PRESCALE_SIZE swapped, but WIN_SIZE is unchanged */
-		in_w = dfixed_trunc(w->h);
-	else
-		in_w = dfixed_trunc(w->w); /* normal output, not rotated */
 
 	tiled_windows_bw_multiplier =
 		tegra_mc_get_tiled_memory_bandwidth_multiplier();
@@ -191,11 +176,9 @@ static unsigned long tegra_dc_calc_win_bandwidth(struct tegra_dc *dc,
 	 * is of the luma plane's size only. */
 	bpp = tegra_dc_is_yuv_planar(w->fmt) ?
 		2 * tegra_dc_fmt_bpp(w->fmt) : tegra_dc_fmt_bpp(w->fmt);
-	ret = dc->mode.pclk / 1000UL * bpp / 8 *
-#if defined(CONFIG_ARCH_TEGRA_2x_SOC) || defined(CONFIG_ARCH_TEGRA_3x_SOC)
-		(win_use_v_filter(dc, w) ? 2 : 1) *
-#endif
-		in_w / w->out_w * (WIN_IS_TILED(w) ?
+	ret = dc->mode.pclk / 1000UL * bpp / 8 * (
+		win_use_v_filter(dc, w) ? 2 : 1) *
+		dfixed_trunc(w->w) / w->out_w * (WIN_IS_TILED(w) ?
 		tiled_windows_bw_multiplier : 1);
 
 #ifdef CONFIG_ARCH_TEGRA_2x_SOC
@@ -231,9 +214,10 @@ static unsigned long tegra_dc_get_bandwidth(
 /* to save power, call when display memory clients would be idle */
 void tegra_dc_clear_bandwidth(struct tegra_dc *dc)
 {
-	trace_clear_bandwidth(dc);
+	trace_printk("%s:%s rate=%d\n", dc->ndev->name, __func__,
+		dc->emc_clk_rate);
 	if (tegra_is_clk_enabled(dc->emc_clk))
-		clk_disable_unprepare(dc->emc_clk);
+		clk_disable(dc->emc_clk);
 	dc->emc_clk_rate = 0;
 }
 
@@ -246,19 +230,32 @@ void tegra_dc_clear_bandwidth(struct tegra_dc *dc)
 void tegra_dc_program_bandwidth(struct tegra_dc *dc, bool use_new)
 {
 	unsigned i;
+	bool yuvp = false;
 
 	if (use_new || dc->emc_clk_rate != dc->new_emc_clk_rate) {
 		/* going from 0 to non-zero */
 		if (!dc->emc_clk_rate && !tegra_is_clk_enabled(dc->emc_clk))
-			clk_prepare_enable(dc->emc_clk);
+			clk_enable(dc->emc_clk);
 
+		/*FIXME:For low resolution video the bandwidth will too low.
+			Set lower bound when emc_clk_rate too tlow.
+		*/
+		if (dc->out->video_min_bw && dc->ndev->id == 0) {
+			for (i = 0; i < DC_N_WINDOWS; i++) {
+				struct tegra_dc_win *w = &dc->windows[i];
+				yuvp |= tegra_dc_is_yuv_planar(w->fmt);
+			}
+
+			if (yuvp)
+				dc->emc_clk_rate = max(dc->out->video_min_bw,dc->emc_clk_rate);
+		}
 		clk_set_rate(dc->emc_clk,
 			max(dc->emc_clk_rate, dc->new_emc_clk_rate));
 		dc->emc_clk_rate = dc->new_emc_clk_rate;
 
 		/* going from non-zero to 0 */
 		if (!dc->new_emc_clk_rate && tegra_is_clk_enabled(dc->emc_clk))
-			clk_disable_unprepare(dc->emc_clk);
+			clk_disable(dc->emc_clk);
 	}
 
 	for (i = 0; i < DC_N_WINDOWS; i++) {
@@ -267,19 +264,10 @@ void tegra_dc_program_bandwidth(struct tegra_dc *dc, bool use_new)
 		if ((use_new || w->bandwidth != w->new_bandwidth) &&
 			w->new_bandwidth != 0)
 			tegra_dc_set_latency_allowance(dc, w);
-		trace_program_bandwidth(dc);
 		w->bandwidth = w->new_bandwidth;
+		trace_printk("%s:win%u bandwidth=%d\n", dc->ndev->name, w->idx,
+			w->bandwidth);
 	}
-}
-
-/* bw in kByte/second. returns Hz for EMC frequency */
-static inline unsigned long tegra_dc_kbps_to_emc(unsigned long bw)
-{
-	if (bw >= (ULONG_MAX / 1000))
-		return ULONG_MAX;
-	if (WARN_ONCE((bw * 1000) < bw, "Bandwidth Overflow"))
-		return ULONG_MAX;
-	return tegra_emc_bw_to_freq_req(bw) * 1000;
 }
 
 int tegra_dc_set_dynamic_emc(struct tegra_dc_win *windows[], int n)
@@ -292,14 +280,18 @@ int tegra_dc_set_dynamic_emc(struct tegra_dc_win *windows[], int n)
 
 	dc = windows[0]->dc;
 
-	if (tegra_dc_has_multiple_dc())
+	/* calculate the new rate based on this POST */
+	new_rate = tegra_dc_get_bandwidth(windows, n);
+	if (WARN_ONCE(new_rate > (ULONG_MAX / 1000), "bandwidth maxed out\n"))
 		new_rate = ULONG_MAX;
 	else
-		new_rate = tegra_dc_kbps_to_emc(
-			tegra_dc_get_bandwidth(windows, n));
+		new_rate = EMC_BW_TO_FREQ(new_rate * 1000);
 
+	if (tegra_dc_has_multiple_dc())
+		new_rate = ULONG_MAX;
+
+	trace_printk("%s:new_emc_clk_rate=%ld\n", dc->ndev->name, new_rate);
 	dc->new_emc_clk_rate = new_rate;
-	trace_set_dynamic_emc(dc);
 
 	return 0;
 }

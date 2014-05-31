@@ -129,8 +129,8 @@ static void action_submit_complete(struct nvhost_waitlist *waiter)
 	struct nvhost_channel *channel = waiter->data;
 	int nr_completed = waiter->count;
 
-	nvhost_module_idle_mult(channel->dev, nr_completed);
 	nvhost_cdma_update(&channel->cdma);
+	nvhost_module_idle_mult(channel->dev, nr_completed);
 
 	/*  Add nr_completed to trace */
 	trace_nvhost_channel_submit_complete(channel->dev->name,
@@ -210,9 +210,7 @@ static int process_wait_list(struct nvhost_intr *intr,
 	remove_completed_waiters(&syncpt->wait_head, threshold, completed);
 
 	empty = list_empty(&syncpt->wait_head);
-	if (empty)
-		intr_op().disable_syncpt_intr(intr, syncpt->id);
-	else
+	if (!empty)
 		reset_threshold_interrupt(intr, &syncpt->wait_head,
 					  syncpt->id);
 
@@ -241,19 +239,17 @@ irqreturn_t nvhost_syncpt_thresh_fn(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-irqreturn_t nvhost_intr_irq_fn(int irq, void *dev_id)
+/**
+ * free a syncpt's irq. syncpt interrupt should be disabled first.
+ */
+static void free_syncpt_irq(struct nvhost_intr_syncpt *syncpt)
 {
-	struct nvhost_intr *intr = dev_id;
-	unsigned long intstat = intr->intstatus;
-	int i;
-
-	for_each_set_bit(i, &intstat, BITS_PER_LONG) {
-		if (intr->generic_isr_thread[i])
-			intr->generic_isr_thread[i]();
+	if (syncpt->irq_requested) {
+		free_irq(syncpt->irq, syncpt);
+		syncpt->irq_requested = 0;
 	}
-
-	return IRQ_HANDLED;
 }
+
 
 /*** host general interrupt service functions ***/
 
@@ -268,6 +264,7 @@ int nvhost_intr_add_action(struct nvhost_intr *intr, u32 id, u32 thresh,
 	struct nvhost_waitlist *waiter = _waiter;
 	struct nvhost_intr_syncpt *syncpt;
 	int queue_was_empty;
+	int err;
 
 	BUG_ON(waiter == NULL);
 
@@ -288,6 +285,23 @@ int nvhost_intr_add_action(struct nvhost_intr *intr, u32 id, u32 thresh,
 	syncpt = intr->syncpt + id;
 
 	spin_lock(&syncpt->lock);
+
+	/* lazily request irq for this sync point */
+	if (!syncpt->irq_requested) {
+		spin_unlock(&syncpt->lock);
+
+		mutex_lock(&intr->mutex);
+		BUG_ON(!(intr_op().request_syncpt_irq));
+		err = intr_op().request_syncpt_irq(syncpt);
+		mutex_unlock(&intr->mutex);
+
+		if (err) {
+			kfree(waiter);
+			return err;
+		}
+
+		spin_lock(&syncpt->lock);
+	}
 
 	queue_was_empty = list_empty(&syncpt->wait_head);
 
@@ -313,19 +327,13 @@ void *nvhost_intr_alloc_waiter()
 			GFP_KERNEL|__GFP_REPEAT);
 }
 
-void nvhost_intr_put_ref(struct nvhost_intr *intr, u32 id, void *ref)
+void nvhost_intr_put_ref(struct nvhost_intr *intr, void *ref)
 {
 	struct nvhost_waitlist *waiter = ref;
-	struct nvhost_intr_syncpt *syncpt;
-	struct nvhost_master *host = intr_to_dev(intr);
 
 	while (atomic_cmpxchg(&waiter->state,
 				WLS_PENDING, WLS_CANCELLED) == WLS_REMOVED)
 		schedule();
-
-	syncpt = intr->syncpt + id;
-	(void)process_wait_list(intr, syncpt,
-				nvhost_syncpt_update_min(&host->syncpt, id));
 
 	kref_put(&waiter->refcount, waiter_release);
 }
@@ -342,9 +350,9 @@ int nvhost_intr_init(struct nvhost_intr *intr, u32 irq_gen, u32 irq_sync)
 
 	mutex_init(&intr->mutex);
 	intr->host_syncpt_irq_base = irq_sync;
-	intr->wq = create_workqueue("host_syncpt");
 	intr_op().init_host_sync(intr);
 	intr->host_general_irq = irq_gen;
+	intr->host_general_irq_requested = false;
 	intr_op().request_host_general_irq(intr);
 
 	for (id = 0, syncpt = intr->syncpt;
@@ -353,6 +361,7 @@ int nvhost_intr_init(struct nvhost_intr *intr, u32 irq_gen, u32 irq_sync)
 		syncpt->intr = &host->intr;
 		syncpt->id = id;
 		syncpt->irq = irq_sync + id;
+		syncpt->irq_requested = 0;
 		spin_lock_init(&syncpt->lock);
 		INIT_LIST_HEAD(&syncpt->wait_head);
 		snprintf(syncpt->thresh_irq_name,
@@ -366,7 +375,6 @@ int nvhost_intr_init(struct nvhost_intr *intr, u32 irq_gen, u32 irq_sync)
 void nvhost_intr_deinit(struct nvhost_intr *intr)
 {
 	nvhost_intr_stop(intr);
-	destroy_workqueue(intr->wq);
 }
 
 void nvhost_intr_start(struct nvhost_intr *intr, u32 hz)
@@ -393,8 +401,7 @@ void nvhost_intr_stop(struct nvhost_intr *intr)
 	u32 nb_pts = nvhost_syncpt_nb_pts(&intr_to_dev(intr)->syncpt);
 
 	BUG_ON(!(intr_op().disable_all_syncpt_intrs &&
-		 intr_op().free_host_general_irq &&
-		 intr_op().free_syncpt_irq));
+		 intr_op().free_host_general_irq));
 
 	mutex_lock(&intr->mutex);
 
@@ -416,23 +423,11 @@ void nvhost_intr_stop(struct nvhost_intr *intr)
 			printk(KERN_DEBUG "%s id=%d\n", __func__, id);
 			BUG_ON(1);
 		}
+
+		free_syncpt_irq(syncpt);
 	}
 
 	intr_op().free_host_general_irq(intr);
-	intr_op().free_syncpt_irq(intr);
 
 	mutex_unlock(&intr->mutex);
-}
-
-void nvhost_intr_enable_general_irq(struct nvhost_intr *intr, int irq,
-	void (*generic_isr)(void), void (*generic_isr_thread))
-{
-	intr->generic_isr[irq] = generic_isr;
-	intr->generic_isr_thread[irq] = generic_isr_thread;
-	intr_op().enable_general_irq(intr, irq);
-}
-
-void nvhost_intr_disable_general_irq(struct nvhost_intr *intr, int irq)
-{
-	intr_op().disable_general_irq(intr, irq);
 }

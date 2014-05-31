@@ -1,7 +1,7 @@
 /*
  * tegra30_i2s.h - Definitions for Tegra 30 I2S driver
  *
- * Copyright (c) 2010-2013, NVIDIA Corporation.
+ * Copyright (c) 2010-2011, NVIDIA Corporation.
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -190,10 +190,7 @@
 
 #ifndef CONFIG_ARCH_TEGRA_3x_SOC
 #define TEGRA30_I2S_SLOT_CTRL2_TX_SLOT_ENABLES_SHIFT	0
-#define TEGRA30_I2S_SLOT_CTRL2_TX_SLOT_ENABLES_MASK	(0xffff << TEGRA30_I2S_SLOT_CTRL2_TX_SLOT_ENABLES_SHIFT)
-
 #define TEGRA30_I2S_SLOT_CTRL2_RX_SLOT_ENABLES_SHIFT	16
-#define TEGRA30_I2S_SLOT_CTRL2_RX_SLOT_ENABLES_MASK	(0xffff << TEGRA30_I2S_SLOT_CTRL2_RX_SLOT_ENABLES_SHIFT)
 #endif
 
 /* Fields in TEGRA30_I2S_CIF_RX_CTRL */
@@ -294,7 +291,15 @@ struct codec_config {
 	int is_i2smaster;
 	int i2s_mode;
 	int bit_clk;
+#ifdef CONFIG_MACH_X3
+	unsigned int dam_gain[2];
+#endif
 };
+
+#ifdef CONFIG_MACH_X3
+void tegra30_set_dam_ifc_gain(struct codec_config *codec_info);
+void tegra30_set_dam_ifc_gain_of_call_record(struct codec_config *codec_info, int rx_gain, int tx_gain);
+#endif
 
 int tegra30_make_voice_call_connections(struct codec_config *codec_info,
 			struct codec_config *bb_info,

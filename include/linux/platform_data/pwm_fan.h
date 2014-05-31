@@ -1,7 +1,7 @@
 /*
  * include/linux/platform_data/pwm_fan.h
  *
- * Copyright (c) 2013, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2012, NVIDIA CORPORATION.  All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -27,13 +27,11 @@ struct pwm_fan_platform_data {
 	int active_pwm[MAX_ACTIVE_STATES];
 	int active_rru[MAX_ACTIVE_STATES];
 	int active_rrd[MAX_ACTIVE_STATES];
-	int state_cap_lookup[MAX_ACTIVE_STATES];
+	int pwm_cap;
 	int pwm_period;
+	int active_temps[MAX_ACTIVE_STATES];
 	int pwm_id;
 	int step_time;
 	int precision_multiplier;
-	int tach_gpio;
-	int state_cap;
-	int pwm_gpio;
 };
 #endif

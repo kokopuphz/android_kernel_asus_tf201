@@ -57,6 +57,7 @@ config SND_SOC_ALL_CODECS
 	select SND_SOC_TLV320AIC32X4 if I2C
 	select SND_SOC_TLV320AIC326X if I2C
 	select SND_SOC_TLV320AIC3X if I2C
+	select SND_SOC_TLV320AIC3008 if SPI_MASTER
 	select SND_SOC_TPA6130A2 if I2C
 	select SND_SOC_TLV320DAC33 if I2C
 	select SND_SOC_TWL4030 if TWL4030_CORE
@@ -270,6 +271,11 @@ config SND_SOC_TLV320AIC23
 config SND_SOC_TLV320AIC26
 	tristate "TI TLV320AIC26 Codec support" if SND_SOC_OF_SIMPLE
 	depends on SPI
+
+config SND_SOC_TLV320AIC3008
+	tristate "Texas Instruments TLV320AIC3008 Codec support"
+	default n
+	depends on SPI_TEGRA || SPI_SLAVE_TEGRA
 
 config SND_SOC_TLV320AIC32X4
 	tristate
